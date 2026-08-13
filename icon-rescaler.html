@@ -73,6 +73,8 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 .item{
   display:flex;gap:7px;align-items:center;width:100%;
   padding:4px 5px;border:1px solid transparent;border-radius:4px;margin-bottom:2px;
+  /* skip rendering rows scrolled out of the queue */
+  content-visibility:auto;contain-intrinsic-size:auto 152px auto 44px;
 }
 .item:hover{background:var(--panel2)}
 .item.sel{background:rgba(224,163,64,.13);border-color:rgba(224,163,64,.55)}
@@ -161,7 +163,11 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
   margin:0 0 9px;color:var(--dim);
 }
 .strip .row{display:flex;gap:9px;overflow-x:auto;min-height:108px;align-items:flex-start;padding-bottom:3px}
-.cell{flex:0 0 auto;text-align:center;cursor:pointer}
+.cell{
+  flex:0 0 auto;text-align:center;cursor:pointer;
+  /* the big one: don't paint preview canvases that are scrolled off-screen */
+  content-visibility:auto;contain-intrinsic-size:auto 104px auto 126px;
+}
 .cell canvas{
   display:block;border:1px solid var(--line2);border-radius:2px;image-rendering:pixelated;
   background-color:var(--ck2);
@@ -619,6 +625,8 @@ function drawList(){
     var pick = document.createElement("button");
     pick.className = "pick";
     var im = document.createElement("img");
+    im.decoding = "async";
+    im.loading = "lazy";
     im.src = it.url;
     var n = document.createElement("span");
     n.className = "n";
