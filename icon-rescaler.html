@@ -87,11 +87,12 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 }
 .item .n{font:11px/1 var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item .x{
-  flex:0 0 auto;width:20px;height:20px;line-height:18px;text-align:center;
-  background:none;border:1px solid transparent;border-radius:3px;
-  color:var(--dim);cursor:pointer;font-size:14px;
+  flex:0 0 auto;width:24px;height:24px;line-height:22px;text-align:center;
+  background:#4a2020;border:1px solid #7a3030;border-radius:4px;
+  color:#ff9b8a;cursor:pointer;font-size:16px;font-weight:700;
+  transition:background .12s,border-color .12s,color .12s;
 }
-.item .x:hover{background:#3a2020;border-color:#6a2f2f;color:#ff9b8a}
+.item .x:hover{background:#c0392b;border-color:#e0503f;color:#fff}
 
 .right{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 
@@ -681,12 +682,25 @@ function drawStrip(){
 function select(i){
   var it = items[i];
   if (!it) return;
+  var prev = active;
   active = i;
   $("blank").classList.add("hide");
   $("holder").classList.remove("hide");
   $("pic").src = it.url;
   $("inc").checked = it.include;
-  drawList(); drawStrip();
+
+  /* Only move the highlight between the two affected rows/cells. Rebuilding the
+     whole queue + strip on every click was what made switching lag with many
+     images. DOM order matches items order, so index maps directly. */
+  var rows = $("list").children, cells = $("strip").children;
+  if (prev >= 0){
+    if (rows[prev]) rows[prev].classList.remove("sel");
+    if (cells[prev]) cells[prev].classList.remove("sel");
+  }
+  if (rows[i]) rows[i].classList.add("sel");
+  if (cells[i]) cells[i].classList.add("sel");
+  $("copy").disabled = false;
+
   requestAnimationFrame(place);
 }
 
