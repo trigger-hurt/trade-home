@@ -1,0 +1,1106 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Icon Bench — batch face crops for DMI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --ink:#11151c;
+  --panel:#181f29;
+  --panel-2:#1e2733;
+  --line:#2b3644;
+  --line-hot:#3a4859;
+  --text:#d9e0e9;
+  --muted:#7c8b9d;
+  --sel:#f2a71b;
+  --sel-dim:rgba(242,167,27,.16);
+  --ok:#57d9a3;
+  --warn:#e8674c;
+  --chk-a:#20272f;
+  --chk-b:#2a323c;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:var(--ink);
+  color:var(--text);
+  font:400 14px/1.5 "IBM Plex Sans",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--sel);outline-offset:2px}
+
+/* ---------- shell ---------- */
+.shell{display:flex;flex-direction:column;height:100vh}
+
+.bar{
+  display:flex;align-items:center;gap:20px;
+  padding:0 18px;height:56px;flex:0 0 56px;
+  border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+.brand{font:700 17px/1 "Space Grotesk",sans-serif;letter-spacing:-.02em}
+.brand span{color:var(--sel)}
+.bar .tag{
+  font:500 10px/1 "IBM Plex Mono",monospace;letter-spacing:.12em;
+  color:var(--muted);text-transform:uppercase;
+  padding-left:14px;border-left:1px solid var(--line);
+}
+.spacer{flex:1}
+
+.btn{
+  padding:8px 14px;border:1px solid var(--line-hot);border-radius:var(--r);
+  font:500 13px/1 "IBM Plex Sans",sans-serif;
+  background:var(--panel-2);transition:border-color .12s,background .12s;
+}
+.btn:hover{border-color:var(--muted);background:#242e3b}
+.btn.primary{background:var(--sel);border-color:var(--sel);color:#1a1305;font-weight:600}
+.btn.primary:hover{background:#ffb92e;border-color:#ffb92e}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn:disabled:hover{background:var(--panel-2);border-color:var(--line-hot)}
+
+/* ---------- body columns ---------- */
+.cols{display:flex;flex:1;min-height:0}
+
+.strip{
+  width:196px;flex:0 0 196px;border-right:1px solid var(--line);
+  background:var(--panel);display:flex;flex-direction:column;min-height:0;
+}
+.strip-head{
+  padding:12px 14px 10px;border-bottom:1px solid var(--line);
+  font:500 10px/1 "IBM Plex Mono",monospace;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.strip-list{overflow-y:auto;flex:1;padding:8px}
+.thumb{
+  display:flex;gap:10px;align-items:center;width:100%;text-align:left;
+  padding:7px;border-radius:var(--r);border:1px solid transparent;
+  margin-bottom:3px;
+}
+.thumb:hover{background:var(--panel-2)}
+.thumb.on{background:var(--sel-dim);border-color:var(--sel)}
+.thumb.skip{opacity:.36}
+.thumb img{
+  width:38px;height:38px;object-fit:cover;border-radius:2px;flex:0 0 38px;
+  background:var(--panel-2);
+}
+.thumb-meta{min-width:0;flex:1}
+.thumb-name{
+  font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:block;
+}
+.thumb-dim{font:400 10px/1.4 "IBM Plex Mono",monospace;color:var(--muted)}
+
+/* ---------- stage ---------- */
+.stage-wrap{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.stage{
+  flex:1;position:relative;min-height:0;
+  display:flex;align-items:center;justify-content:center;
+  padding:22px;overflow:hidden;
+  background-image:
+    linear-gradient(45deg,var(--chk-a) 25%,transparent 25%),
+    linear-gradient(-45deg,var(--chk-a) 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,var(--chk-a) 75%),
+    linear-gradient(-45deg,transparent 75%,var(--chk-a) 75%);
+  background-size:16px 16px;
+  background-position:0 0,0 8px,8px -8px,-8px 0;
+  background-color:var(--chk-b);
+}
+.canvas-box{
+  position:relative;line-height:0;box-shadow:0 8px 40px rgba(0,0,0,.5);
+  max-width:100%;max-height:100%;
+}
+.canvas-box img{
+  display:block;
+  max-width:100%;max-height:100%;
+  width:auto;height:auto;
+  user-select:none;-webkit-user-drag:none;
+}
+.veil{position:absolute;background:rgba(10,13,18,.62);pointer-events:none}
+
+.crop{
+  position:absolute;border:1px solid var(--sel);cursor:move;
+}
+.crop::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--sel) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--sel) 1px,transparent 1px);
+  background-size:33.333% 33.333%;
+  opacity:.22;
+}
+.grip{
+  position:absolute;width:12px;height:12px;background:var(--sel);border-radius:1px;
+}
+.grip.nw{top:-6px;left:-6px;cursor:nwse-resize}
+.grip.ne{top:-6px;right:-6px;cursor:nesw-resize}
+.grip.sw{bottom:-6px;left:-6px;cursor:nesw-resize}
+.grip.se{bottom:-6px;right:-6px;cursor:nwse-resize}
+
+.empty{text-align:center;max-width:420px;z-index:2}
+.empty h2{font:500 20px/1.3 "Space Grotesk",sans-serif;margin:0 0 10px}
+.empty p{color:var(--muted);margin:0 0 22px;font-size:13px}
+
+/* ---------- controls ---------- */
+.ctrl{
+  flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);
+  padding:12px 18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;
+}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{
+  font:500 10px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);
+}
+.field .row{display:flex;align-items:center;gap:9px}
+.field input[type=range]{width:130px;accent-color:var(--sel)}
+.num{font:500 12px/1 "IBM Plex Mono",monospace;color:var(--text);min-width:38px}
+.seg{display:flex;border:1px solid var(--line-hot);border-radius:var(--r);overflow:hidden}
+.seg button{
+  padding:6px 11px;font:500 12px/1 "IBM Plex Mono",monospace;
+  background:var(--panel-2);border-right:1px solid var(--line-hot);
+}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--sel);color:#1a1305}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;user-select:none}
+.chk input{accent-color:var(--sel);width:15px;height:15px}
+
+/* ---------- 1:1 rail (signature) ---------- */
+.rail{
+  flex:0 0 auto;border-top:1px solid var(--line);background:var(--ink);
+  padding:12px 18px 14px;
+}
+.rail-head{
+  font:500 10px/1 "IBM Plex Mono",monospace;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:10px;
+  display:flex;gap:10px;align-items:baseline;
+}
+.rail-head b{color:var(--sel);font-weight:500}
+.rail-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;min-height:112px}
+.chip{position:relative;flex:0 0 auto}
+.chip canvas{
+  display:block;border:1px solid var(--line-hot);
+  image-rendering:pixelated;
+  background-image:
+    linear-gradient(45deg,var(--chk-a) 25%,transparent 25%),
+    linear-gradient(-45deg,var(--chk-a) 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,var(--chk-a) 75%),
+    linear-gradient(-45deg,transparent 75%,var(--chk-a) 75%);
+  background-size:12px 12px;
+  background-position:0 0,0 6px,6px -6px,-6px 0;
+  background-color:var(--chk-b);
+}
+.chip.on canvas{border-color:var(--sel)}
+.chip.skip{opacity:.3}
+.chip-tag{
+  font:400 9px/1.4 "IBM Plex Mono",monospace;color:var(--muted);
+  margin-top:4px;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.rail-empty{color:var(--muted);font-size:12px;font-style:italic;padding:38px 0}
+
+.hidden{display:none !important}
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);
+  background:var(--panel-2);border:1px solid var(--sel);color:var(--text);
+  padding:9px 16px;border-radius:var(--r);
+  font:500 12px/1 "IBM Plex Mono",monospace;letter-spacing:.02em;
+  opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;
+  z-index:50;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:var(--warn)}
+
+@media (max-width:820px){
+  .strip{width:132px;flex-basis:132px}
+  .ctrl{gap:16px}
+}
+</style>
+
+<div class="shell">
+  <header class="bar">
+    <div class="brand">Icon<span>Bench</span></div>
+    <div class="tag" id="counter">no images</div>
+    <div class="spacer"></div>
+    <button class="btn" id="addBtn">Add images</button>
+    <button class="btn" id="copyBtn" disabled>Copy icon</button>
+    <button class="btn primary" id="exportBtn" disabled>Export ZIP</button>
+  </header>
+
+  <div class="cols">
+    <aside class="strip">
+      <div class="strip-head"><span>Queue</span><span id="incCount">0</span></div>
+      <div class="strip-list" id="stripList"></div>
+    </aside>
+
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <div class="empty" id="empty">
+          <h2>Drop your art here</h2>
+          <p>Or paste with <b>Ctrl+V</b>. Pick a square around each face &mdash;
+             everything gets Lanczos-downscaled to 96&times;96 and sharpened, so it
+             stays readable at icon size.</p>
+          <button class="btn" id="emptyBtn">Choose files</button>
+        </div>
+        <div class="canvas-box hidden" id="box">
+          <img id="stageImg" alt="">
+          <div class="veil" id="vT"></div>
+          <div class="veil" id="vB"></div>
+          <div class="veil" id="vL"></div>
+          <div class="veil" id="vR"></div>
+          <div class="crop" id="crop" tabindex="0">
+            <i class="grip nw" data-g="nw"></i><i class="grip ne" data-g="ne"></i>
+            <i class="grip sw" data-g="sw"></i><i class="grip se" data-g="se"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <div class="field">
+          <label>Output</label>
+          <div class="seg" id="sizeSeg">
+            <button data-s="32">32</button><button data-s="48">48</button>
+            <button data-s="64">64</button><button data-s="96" class="on">96</button>
+            <button data-s="128">128</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Sharpen</label>
+          <div class="row">
+            <input type="range" id="sharp" min="0" max="150" value="55" step="5">
+            <span class="num" id="sharpNum">55%</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Crop size</label>
+          <div class="row">
+            <input type="range" id="cropSize" min="5" max="100" value="55" step="1">
+            <span class="num" id="cropNum">—</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Mix in</label>
+          <div class="seg" id="gammaSeg">
+            <button data-g="1" class="on">Linear</button><button data-g="0">sRGB</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Sharpen mode</label>
+          <div class="seg" id="haloSeg">
+            <button data-h="1" class="on">Halo-free</button><button data-h="0">Classic</button>
+          </div>
+        </div>
+        <label class="chk"><input type="checkbox" id="incl" checked> Include in export</label>
+      </div>
+
+      <div class="rail">
+        <div class="rail-head">
+          <span>Actual size preview</span>
+          <b id="railNote">1:1 — this is exactly what lands in the DMI</b>
+        </div>
+        <div class="rail-scroll" id="rail">
+          <div class="rail-empty">Previews appear here once you load something.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file" accept="image/*" multiple class="hidden">
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============ state ============ */
+var items = [];      // {id,name,img,w,h,crop:{x,y,s},include,canvas,url}
+var active = -1;
+var outSize = 96;
+var sharpen = 0.55;
+var gammaCorrect = true;
+var haloFree = true;
+var nextId = 1;
+var pasteCount = 0;
+
+var $ = function(id){ return document.getElementById(id); };
+
+var toastTimer;
+function toast(msg, bad){
+  var t = $("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){
+    t.className = "toast" + (bad ? " bad" : "");
+  }, 2200);
+}
+
+/* ============ Lanczos-3 resampler ============
+   Canvas drawImage gives you bilinear-ish results that go mushy on big
+   reductions. This does a proper separable Lanczos pass instead, which is
+   what keeps linework legible at 96px. */
+function lanczos(x, a){
+  if (x === 0) return 1;
+  if (x <= -a || x >= a) return 0;
+  var px = Math.PI * x;
+  return a * Math.sin(px) * Math.sin(px / a) / (px * px);
+}
+
+function weights(srcLen, dstLen, a){
+  var ratio = dstLen / srcLen;
+  var scale = ratio < 1 ? 1 / ratio : 1;
+  var support = a * scale;
+  var out = new Array(dstLen);
+  for (var i = 0; i < dstLen; i++){
+    var center = (i + 0.5) / ratio - 0.5;
+    var start = Math.max(0, Math.ceil(center - support));
+    var end = Math.min(srcLen - 1, Math.floor(center + support));
+    var idx = [], wts = [], sum = 0;
+    for (var j = start; j <= end; j++){
+      var w = lanczos((j - center) / scale, a);
+      if (w !== 0){ idx.push(j); wts.push(w); sum += w; }
+    }
+    if (sum === 0){ idx = [Math.min(srcLen-1, Math.max(0, Math.round(center)))]; wts = [1]; sum = 1; }
+    for (var k = 0; k < wts.length; k++) wts[k] /= sum;
+    out[i] = { idx: idx, wts: wts };
+  }
+  return out;
+}
+
+/* ============ colour space ============
+   Averaging sRGB values is arithmetically wrong: sRGB is perceptually coded,
+   not linear in light. Mixing black linework with pale skin in sRGB space
+   biases the result dark, which is why naive downscales thicken lines. */
+var S2L = (function(){
+  var t = new Float32Array(256);
+  for (var i = 0; i < 256; i++){
+    var c = i / 255;
+    t[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  return t;
+})();
+
+function l2s(v){
+  if (v <= 0) return 0;
+  if (v >= 1) return 1;
+  return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+}
+
+function toWorking(u8, n, linearize){
+  var f = new Float32Array(n * 4);
+  for (var i = 0, o = 0; i < n; i++, o += 4){
+    if (linearize){
+      f[o] = S2L[u8[o]]; f[o+1] = S2L[u8[o+1]]; f[o+2] = S2L[u8[o+2]];
+    } else {
+      f[o] = u8[o] / 255; f[o+1] = u8[o+1] / 255; f[o+2] = u8[o+2] / 255;
+    }
+    f[o+3] = u8[o+3] / 255;
+  }
+  return f;
+}
+
+/* 4x4 ordered dither at half an LSB — stops smooth hair gradients from
+   banding once 32-bit float collapses to 8-bit. */
+var BAYER = [0,8,2,10, 12,4,14,6, 3,11,1,9, 15,7,13,5];
+
+function toBytes8(f, w, h, delinearize){
+  var out = new Uint8ClampedArray(w * h * 4);
+  for (var y = 0; y < h; y++){
+    for (var x = 0; x < w; x++){
+      var o = (y * w + x) * 4;
+      var d = (BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.46875) / 255;
+      for (var c = 0; c < 3; c++){
+        var v = delinearize ? l2s(f[o+c]) : f[o+c];
+        out[o+c] = Math.round((v + d) * 255);
+      }
+      out[o+3] = Math.round(f[o+3] * 255);
+    }
+  }
+  return out;
+}
+
+function resample(src, sw, sh, dw, dh){
+  var a = 3;
+  var wx = weights(sw, dw, a);
+  var wy = weights(sh, dh, a);
+  var tmp = new Float32Array(dw * sh * 4);
+
+  for (var y = 0; y < sh; y++){
+    var rowOff = y * sw * 4;
+    for (var x = 0; x < dw; x++){
+      var f = wx[x], r = 0, g = 0, b = 0, al = 0;
+      for (var k = 0; k < f.idx.length; k++){
+        var o = rowOff + f.idx[k] * 4, w = f.wts[k];
+        var aa = src[o + 3];
+        // premultiply so transparent pixels don't bleed colour in
+        r += src[o] * aa * w; g += src[o+1] * aa * w; b += src[o+2] * aa * w; al += aa * w;
+      }
+      var t = (y * dw + x) * 4;
+      tmp[t] = r; tmp[t+1] = g; tmp[t+2] = b; tmp[t+3] = al;
+    }
+  }
+
+  var out = new Float32Array(dw * dh * 4);
+  for (var dy = 0; dy < dh; dy++){
+    var fy = wy[dy];
+    for (var dx = 0; dx < dw; dx++){
+      var r2 = 0, g2 = 0, b2 = 0, a2 = 0;
+      for (var m = 0; m < fy.idx.length; m++){
+        var o2 = (fy.idx[m] * dw + dx) * 4, w2 = fy.wts[m];
+        r2 += tmp[o2] * w2; g2 += tmp[o2+1] * w2; b2 += tmp[o2+2] * w2; a2 += tmp[o2+3] * w2;
+      }
+      var d = (dy * dw + dx) * 4;
+      if (a2 > 1e-6){
+        out[d]   = r2 / a2;
+        out[d+1] = g2 / a2;
+        out[d+2] = b2 / a2;
+      }
+      out[d+3] = a2;
+    }
+  }
+  return out;
+}
+
+/* ============ sharpen ============
+   Runs on floats before quantization. haloFree clamps each result to its own
+   3x3 neighbourhood range, which kills the bright fringe that plain unsharp
+   throws along high-contrast linework. */
+function sharpen3(f, w, h, amount, haloFree){
+  if (amount <= 0) return f;
+  var n = w * h;
+  var blur = new Float32Array(n * 3);
+  var lo = haloFree ? new Float32Array(n * 3) : null;
+  var hi = haloFree ? new Float32Array(n * 3) : null;
+  var kern = [1,2,1,2,4,2,1,2,1], kSum = 16;
+
+  for (var y = 0; y < h; y++){
+    for (var x = 0; x < w; x++){
+      var r = 0, g = 0, b = 0, ki = 0;
+      var r0 = 1e9, g0 = 1e9, b0 = 1e9, r1 = -1e9, g1 = -1e9, b1 = -1e9;
+      for (var dy = -1; dy <= 1; dy++){
+        var yy = Math.min(h - 1, Math.max(0, y + dy));
+        for (var dx = -1; dx <= 1; dx++){
+          var xx = Math.min(w - 1, Math.max(0, x + dx));
+          var o = (yy * w + xx) * 4, k = kern[ki++];
+          var vr = f[o], vg = f[o+1], vb = f[o+2];
+          r += vr * k; g += vg * k; b += vb * k;
+          if (haloFree){
+            if (vr < r0) r0 = vr; if (vr > r1) r1 = vr;
+            if (vg < g0) g0 = vg; if (vg > g1) g1 = vg;
+            if (vb < b0) b0 = vb; if (vb > b1) b1 = vb;
+          }
+        }
+      }
+      var t = (y * w + x) * 3;
+      blur[t] = r / kSum; blur[t+1] = g / kSum; blur[t+2] = b / kSum;
+      if (haloFree){
+        lo[t] = r0; lo[t+1] = g0; lo[t+2] = b0;
+        hi[t] = r1; hi[t+1] = g1; hi[t+2] = b1;
+      }
+    }
+  }
+
+  for (var i = 0, p = 0; i < n; i++, p += 3){
+    var o2 = i * 4;
+    for (var c = 0; c < 3; c++){
+      var v = f[o2+c] + amount * (f[o2+c] - blur[p+c]);
+      if (haloFree) v = Math.min(hi[p+c], Math.max(lo[p+c], v));
+      f[o2+c] = v;
+    }
+  }
+  return f;
+}
+
+/* ============ render one item ============ */
+function render(it){
+  var c = it.crop;
+  var s = Math.max(1, Math.round(c.s));
+  var sx = Math.round(c.x), sy = Math.round(c.y);
+
+  var cut = document.createElement("canvas");
+  cut.width = s; cut.height = s;
+  var cx = cut.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(it.img, sx, sy, s, s, 0, 0, s, s);
+
+  /* Lanczos tap count scales with the reduction ratio, so a 3000px crop going
+     to 96 costs ~50M ops. Halve with the GPU first until we're within 4x of
+     target — successive halving is artifact-free — then do the real filter. */
+  var cur = s;
+  while (cur > outSize * 4){
+    var half = Math.max(outSize, Math.round(cur / 2));
+    var step = document.createElement("canvas");
+    step.width = half; step.height = half;
+    var sctx = step.getContext("2d", { willReadFrequently: true });
+    sctx.imageSmoothingEnabled = true;
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(cut, 0, 0, cur, cur, 0, 0, half, half);
+    cut = step; cx = sctx; cur = half;
+  }
+
+  var srcData;
+  try {
+    srcData = cx.getImageData(0, 0, cur, cur).data;
+  } catch (err){
+    /* Almost always a tainted canvas. Under file:// some browsers give blob
+       URLs an opaque origin, which poisons every pixel read in this app. */
+    var e2 = new Error(
+      location.protocol === "file:"
+        ? "Pixel read blocked under file:// \u2014 serve over http instead"
+        : "Pixel read blocked (" + err.name + ")"
+    );
+    e2.name = "CanvasBlocked";
+    throw e2;
+  }
+  var lin = toWorking(srcData, cur * cur, gammaCorrect);
+  var px = resample(lin, cur, cur, outSize, outSize);
+  sharpen3(px, outSize, outSize, sharpen, haloFree);
+  var bytes = toBytes8(px, outSize, outSize, gammaCorrect);
+
+  var out = it.canvas || document.createElement("canvas");
+  out.width = outSize; out.height = outSize;
+  out.style.width = outSize + "px";
+  out.style.height = outSize + "px";
+  var octx = out.getContext("2d");
+  octx.putImageData(new ImageData(bytes, outSize, outSize), 0, 0);
+  it.canvas = out;
+  return out;
+}
+
+function renderAll(){
+  items.forEach(render);
+  drawRail();
+}
+
+/* ============ rail ============ */
+function drawRail(){
+  var rail = $("rail");
+  rail.innerHTML = "";
+  if (!items.length){
+    rail.innerHTML = '<div class="rail-empty">Previews appear here once you load something.</div>';
+    return;
+  }
+  items.forEach(function(it, i){
+    var canvas = it.canvas;
+    if (!canvas){
+      try { canvas = render(it); }
+      catch (err){ it.broken = true; return; }
+    }
+    var chip = document.createElement("div");
+    chip.className = "chip" + (i === active ? " on" : "") + (it.include ? "" : " skip");
+    chip.appendChild(canvas);
+    var tag = document.createElement("div");
+    tag.className = "chip-tag";
+    tag.textContent = it.name;
+    chip.appendChild(tag);
+    chip.title = it.name + " — click to edit";
+    chip.addEventListener("click", function(){ select(i); });
+    rail.appendChild(chip);
+  });
+}
+
+/* ============ strip ============ */
+function drawStrip(){
+  var list = $("stripList");
+  list.innerHTML = "";
+  items.forEach(function(it, i){
+    var b = document.createElement("button");
+    b.className = "thumb" + (i === active ? " on" : "") + (it.include ? "" : " skip");
+    var im = document.createElement("img");
+    im.src = it.url;
+    var meta = document.createElement("div");
+    meta.className = "thumb-meta";
+    meta.innerHTML = '<span class="thumb-name"></span><span class="thumb-dim">' +
+                     it.w + "\u00d7" + it.h + "</span>";
+    meta.querySelector(".thumb-name").textContent = it.name;
+    b.appendChild(im); b.appendChild(meta);
+    b.addEventListener("click", function(){ select(i); });
+    list.appendChild(b);
+  });
+  var inc = items.filter(function(x){ return x.include; }).length;
+  $("incCount").textContent = inc + "/" + items.length;
+  $("counter").textContent = items.length
+    ? items.length + " loaded \u00b7 " + inc + " queued \u00b7 " + outSize + "px"
+    : "no images";
+  $("exportBtn").disabled = inc === 0;
+  $("copyBtn").disabled = active < 0;
+}
+
+/* ============ stage ============ */
+function select(i){
+  active = i;
+  var it = items[i];
+  if (!it) return;
+  $("empty").classList.add("hidden");
+  $("box").classList.remove("hidden");
+  $("stageImg").src = it.url;
+  $("incl").checked = it.include;
+  drawStrip(); drawRail();
+  requestAnimationFrame(placeCrop);
+}
+
+function scale(){
+  var it = items[active];
+  if (!it) return 1;
+  var img = $("stageImg");
+  return img.clientWidth / it.w || 1;
+}
+
+function fitImage(){
+  var it = items[active];
+  if (!it) return;
+  var stage = $("stage");
+  var pad = 44;                                  // 22px padding each side
+  var availW = Math.max(80, stage.clientWidth  - pad);
+  var availH = Math.max(80, stage.clientHeight - pad);
+  var k = Math.min(availW / it.w, availH / it.h);
+  if (!isFinite(k) || k <= 0) k = 1;
+  k = Math.min(k, 1);                            // never blow up past 1:1
+  var img = $("stageImg");
+  img.style.width  = Math.max(1, Math.floor(it.w * k)) + "px";
+  img.style.height = Math.max(1, Math.floor(it.h * k)) + "px";
+}
+
+function placeCrop(){
+  var it = items[active];
+  if (!it) return;
+  fitImage();
+  var k = scale(), c = it.crop, el = $("crop");
+  var img = $("stageImg");
+  var dw = img.clientWidth, dh = img.clientHeight;
+  var x = c.x * k, y = c.y * k, s = c.s * k;
+
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  el.style.width = s + "px";
+  el.style.height = s + "px";
+
+  /* Four panels tiling everything outside the crop. Each is a normal box, so
+     it invalidates and repaints correctly when the selection moves. */
+  panel($("vT"), 0, 0, dw, Math.max(0, y));
+  panel($("vB"), 0, y + s, dw, Math.max(0, dh - (y + s)));
+  panel($("vL"), 0, y, Math.max(0, x), Math.max(0, s));
+  panel($("vR"), x + s, y, Math.max(0, dw - (x + s)), Math.max(0, s));
+
+  var pct = Math.round(c.s / Math.min(it.w, it.h) * 100);
+  $("cropSize").value = Math.min(100, Math.max(5, pct));
+  $("cropNum").textContent = Math.round(c.s) + "px";
+}
+
+function panel(el, x, y, w, h){
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  el.style.width = w + "px";
+  el.style.height = h + "px";
+}
+
+function clampCrop(it){
+  var c = it.crop;
+  var max = Math.min(it.w, it.h);
+  c.s = Math.max(8, Math.min(max, c.s));
+  c.x = Math.max(0, Math.min(it.w - c.s, c.x));
+  c.y = Math.max(0, Math.min(it.h - c.s, c.y));
+}
+
+function commit(){
+  var it = items[active];
+  if (!it) return;
+  clampCrop(it);
+  placeCrop();
+  render(it);
+  drawRail();
+}
+
+/* ---- drag / resize ---- */
+(function(){
+  var mode = null, grip = null, start = null;
+
+  $("crop").addEventListener("pointerdown", function(e){
+    var it = items[active];
+    if (!it) return;
+    grip = e.target.dataset ? e.target.dataset.g : null;
+    mode = grip ? "resize" : "move";
+    start = { mx: e.clientX, my: e.clientY, c: { x: it.crop.x, y: it.crop.y, s: it.crop.s } };
+    e.target.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  window.addEventListener("pointermove", function(e){
+    if (!mode) return;
+    var it = items[active];
+    var k = scale();
+    var dx = (e.clientX - start.mx) / k;
+    var dy = (e.clientY - start.my) / k;
+
+    if (mode === "move"){
+      it.crop.x = start.c.x + dx;
+      it.crop.y = start.c.y + dy;
+    } else {
+      // square resize anchored to the opposite corner
+      var d = (grip === "se") ?  (dx + dy) / 2
+            : (grip === "nw") ? -(dx + dy) / 2
+            : (grip === "ne") ?  (dx - dy) / 2
+            :                    (dy - dx) / 2;
+      var ns = start.c.s + d;
+      var max = Math.min(it.w, it.h);
+      ns = Math.max(8, Math.min(max, ns));
+      var delta = ns - start.c.s;
+      it.crop.s = ns;
+      if (grip === "nw"){ it.crop.x = start.c.x - delta; it.crop.y = start.c.y - delta; }
+      if (grip === "ne"){ it.crop.y = start.c.y - delta; }
+      if (grip === "sw"){ it.crop.x = start.c.x - delta; }
+    }
+    clampCrop(it);
+    placeCrop();
+  });
+
+  window.addEventListener("pointerup", function(){
+    if (!mode) return;
+    mode = null; grip = null;
+    commit();
+  });
+})();
+
+/* ---- keyboard nudge ---- */
+$("crop").addEventListener("keydown", function(e){
+  var it = items[active];
+  if (!it) return;
+  var step = e.shiftKey ? 10 : 1;
+  var k = e.key;
+  if (k === "ArrowLeft")  it.crop.x -= step;
+  else if (k === "ArrowRight") it.crop.x += step;
+  else if (k === "ArrowUp")    it.crop.y -= step;
+  else if (k === "ArrowDown")  it.crop.y += step;
+  else if (k === "+" || k === "=") it.crop.s += step;
+  else if (k === "-" || k === "_") it.crop.s -= step;
+  else return;
+  e.preventDefault();
+  commit();
+});
+
+/* ============ loading ============ */
+function load(files, prefix){
+  var list = Array.prototype.slice.call(files).filter(function(f){
+    return /^image\//.test(f.type);
+  });
+  if (!list.length){
+    toast("No decodable image in that", true);
+    return 0;
+  }
+  var pending = list.length, added = 0, failed = [];
+
+  list.forEach(function(f){
+    var label = prefix
+      ? prefix + "_" + ("0" + (++pasteCount)).slice(-2)
+      : f.name.replace(/\.[^.]+$/, "");
+    var url = URL.createObjectURL(f);
+    var img = new Image();
+    img.onload = function(){
+      if (!img.naturalWidth || !img.naturalHeight){
+        URL.revokeObjectURL(url);
+        failed.push(label + " (zero dimensions)");
+        return done();
+      }
+      var min = Math.min(img.naturalWidth, img.naturalHeight);
+      var s = min * 0.55;
+      items.push({
+        id: nextId++,
+        name: label,
+        img: img, url: url,
+        w: img.naturalWidth, h: img.naturalHeight,
+        // faces sit high in a portrait, so bias the default box upward
+        crop: { x: (img.naturalWidth - s) / 2, y: Math.max(0, (img.naturalHeight - s) * 0.28), s: s },
+        include: true, canvas: null
+      });
+      added++;
+      done();
+    };
+    img.onerror = function(){
+      URL.revokeObjectURL(url);
+      failed.push(label + " (decode failed)");
+      done();
+    };
+    img.src = url;
+  });
+
+  function done(){
+    if (--pending) return;
+
+    /* One bad image used to take the whole batch down with it, because the
+       throw happened before anything got drawn. Isolate each render. */
+    var firstErr = null;
+    items.forEach(function(it){
+      try { render(it); }
+      catch (err){ it.broken = true; if (!firstErr) firstErr = err; }
+    });
+
+    if (active < 0 && items.length){
+      var firstOk = items.findIndex(function(x){ return !x.broken; });
+      if (firstOk >= 0) select(firstOk);
+    }
+    drawStrip(); drawRail();
+
+    if (firstErr){
+      console.error("[IconBench] render failed:", firstErr);
+      toast(firstErr.name + ": " + firstErr.message.slice(0, 60), true);
+    } else if (failed.length){
+      console.warn("[IconBench] skipped:", failed);
+      toast(added + " added \u00b7 " + failed.length + " skipped \u2014 see console", true);
+    } else {
+      toast(added + (added === 1 ? " image added" : " images added"));
+    }
+  }
+  return list.length;
+}
+
+$("file").addEventListener("change", function(e){ load(e.target.files); e.target.value = ""; });
+$("addBtn").addEventListener("click", function(){ $("file").click(); });
+$("emptyBtn").addEventListener("click", function(){ $("file").click(); });
+
+["dragenter","dragover"].forEach(function(ev){
+  document.addEventListener(ev, function(e){ e.preventDefault(); });
+});
+document.addEventListener("drop", function(e){
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files) load(e.dataTransfer.files);
+});
+
+/* ============ paste in ============ */
+document.addEventListener("paste", function(e){
+  var cd = e.clipboardData;
+  if (!cd) return;
+  var files = [];
+  var list = cd.items || [];
+  for (var i = 0; i < list.length; i++){
+    if (list[i].kind === "file" && /^image\//.test(list[i].type)){
+      var f = list[i].getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (!files.length && cd.files && cd.files.length){
+    files = Array.prototype.slice.call(cd.files);
+  }
+  if (!files.length){
+    toast("Clipboard has no image \u2014 copy the image itself, not a link", true);
+    return;
+  }
+  e.preventDefault();
+  load(files, "pasted");
+});
+
+/* ============ controls ============ */
+$("sizeSeg").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  outSize = parseInt(b.dataset.s, 10);
+  Array.prototype.forEach.call(this.children, function(x){ x.classList.remove("on"); });
+  b.classList.add("on");
+  renderAll(); drawStrip();
+});
+
+$("sharp").addEventListener("input", function(){
+  sharpen = this.value / 100;
+  $("sharpNum").textContent = this.value + "%";
+});
+$("sharp").addEventListener("change", renderAll);
+
+$("cropSize").addEventListener("input", function(){
+  var it = items[active];
+  if (!it) return;
+  var max = Math.min(it.w, it.h);
+  var ns = max * (this.value / 100);
+  var cxx = it.crop.x + it.crop.s / 2, cyy = it.crop.y + it.crop.s / 2;
+  it.crop.s = ns;
+  it.crop.x = cxx - ns / 2; it.crop.y = cyy - ns / 2;
+  clampCrop(it); placeCrop();
+});
+$("cropSize").addEventListener("change", commit);
+
+$("gammaSeg").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  gammaCorrect = b.dataset.g === "1";
+  Array.prototype.forEach.call(this.children, function(x){ x.classList.remove("on"); });
+  b.classList.add("on");
+  renderAll();
+});
+
+$("haloSeg").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  haloFree = b.dataset.h === "1";
+  Array.prototype.forEach.call(this.children, function(x){ x.classList.remove("on"); });
+  b.classList.add("on");
+  renderAll();
+});
+
+$("incl").addEventListener("change", function(){
+  var it = items[active];
+  if (!it) return;
+  it.include = this.checked;
+  drawStrip(); drawRail();
+});
+
+window.addEventListener("resize", function(){ if (active >= 0) placeCrop(); });
+$("stageImg").addEventListener("load", placeCrop);
+
+/* ============ zip (store, no deps) ============ */
+var CRC = (function(){
+  var t = new Uint32Array(256);
+  for (var n = 0; n < 256; n++){
+    var c = n;
+    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf){
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function zip(files){
+  var enc = new TextEncoder();
+  var parts = [], central = [], offset = 0;
+
+  files.forEach(function(f){
+    var name = enc.encode(f.name);
+    var crc = crc32(f.data), len = f.data.length;
+
+    var lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true); lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, 0, true); lh.setUint16(12, 0x2100, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, len, true); lh.setUint32(22, len, true);
+    lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+
+    parts.push(new Uint8Array(lh.buffer), name, f.data);
+
+    var ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true);
+    ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, 0, true); ch.setUint16(14, 0x2100, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, len, true); ch.setUint32(24, len, true);
+    ch.setUint16(28, name.length, true);
+    ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+
+    offset += 30 + name.length + len;
+  });
+
+  var cSize = central.reduce(function(a, b){ return a + b.length; }, 0);
+  var eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0, 0x06054b50, true);
+  eo.setUint16(8, files.length, true); eo.setUint16(10, files.length, true);
+  eo.setUint32(12, cSize, true); eo.setUint32(16, offset, true);
+
+  return new Blob(parts.concat(central, [new Uint8Array(eo.buffer)]),
+                  { type: "application/zip" });
+}
+
+function toBytes(canvas){
+  return new Promise(function(res){
+    canvas.toBlob(function(b){
+      b.arrayBuffer().then(function(ab){ res(new Uint8Array(ab)); });
+    }, "image/png");
+  });
+}
+
+/* ============ copy out ============ */
+function blobOf(canvas){
+  return new Promise(function(res){ canvas.toBlob(res, "image/png"); });
+}
+
+function safeName(it){
+  return (it.name.replace(/[^\w.-]+/g, "_") || "icon") + "_" + outSize;
+}
+
+function saveOne(it, blob){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = safeName(it) + ".png"; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+
+function copyActive(){
+  var it = items[active];
+  if (!it) return;
+  var pending = blobOf(render(it));
+
+  if (!navigator.clipboard || !window.ClipboardItem || !navigator.clipboard.write){
+    pending.then(function(b){
+      toast("No clipboard image support \u2014 saved instead", true);
+      saveOne(it, b);
+    });
+    return;
+  }
+  /* Safari needs write() called synchronously in the gesture, so hand
+     ClipboardItem the promise rather than awaiting the blob first. */
+  try {
+    navigator.clipboard.write([ new ClipboardItem({ "image/png": pending }) ])
+      .then(function(){
+        toast("Copied " + outSize + "\u00d7" + outSize + " \u2014 paste into the DMI");
+      })
+      .catch(function(){
+        pending.then(function(b){
+          toast("Clipboard blocked \u2014 saved instead", true);
+          saveOne(it, b);
+        });
+      });
+  } catch (err){
+    pending.then(function(b){
+      toast("Clipboard blocked \u2014 saved instead", true);
+      saveOne(it, b);
+    });
+  }
+}
+
+$("copyBtn").addEventListener("click", copyActive);
+
+window.addEventListener("keydown", function(e){
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key !== "c" && e.key !== "C") return;
+  var sel = window.getSelection();
+  if (sel && String(sel).length) return;   // let a real text selection copy
+  if (active < 0) return;
+  e.preventDefault();
+  copyActive();
+});
+
+$("exportBtn").addEventListener("click", function(){
+  var btn = this, keep = items.filter(function(x){ return x.include; });
+  if (!keep.length) return;
+  btn.disabled = true; btn.textContent = "Packing\u2026";
+
+  var used = {};
+  Promise.all(keep.map(function(it){
+    return toBytes(render(it)).then(function(data){
+      var base = it.name.replace(/[^\w.-]+/g, "_") || "icon";
+      used[base] = (used[base] || 0) + 1;
+      var n = used[base] > 1 ? base + "_" + used[base] : base;
+      return { name: n + "_" + outSize + ".png", data: data };
+    });
+  })).then(function(files){
+    var url = URL.createObjectURL(zip(files));
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "icons_" + outSize + "px.zip";
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+    btn.disabled = false; btn.textContent = "Export ZIP";
+  }).catch(function(){
+    btn.textContent = "Export failed \u2014 retry";
+    btn.disabled = false;
+  });
+});
+
+})();
+</script>

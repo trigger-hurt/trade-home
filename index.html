@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trade home</title>
+<style>
+  :root{
+    --bg:#14130f;
+    --fg:#eae7dd;
+    --dim:#8a8577;
+    --rule:#2a2820;
+    --link:#e6b34a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--fg);
+    font:16px/1.6 Georgia,'Times New Roman',serif;
+    padding:8vh 24px 20vh;
+  }
+  .page{max-width:640px;margin:0 auto}
+
+  h1{
+    font-size:34px;
+    font-weight:normal;
+    letter-spacing:.5px;
+    margin-bottom:44px;
+  }
+  h1::after{
+    content:"";
+    display:block;
+    width:52px;height:2px;
+    background:var(--link);
+    margin-top:16px;
+  }
+
+  .group{margin-bottom:40px}
+  .group > h2{
+    font:600 13px/1 ui-monospace,'Cascadia Mono',Consolas,monospace;
+    letter-spacing:.18em;
+    color:var(--dim);
+    margin-bottom:16px;
+  }
+
+  ul{list-style:none}
+  li{
+    padding:14px 0;
+    border-top:1px solid var(--rule);
+  }
+  li:last-child{border-bottom:1px solid var(--rule)}
+
+  a.item{
+    color:var(--link);
+    text-decoration:none;
+    font-size:19px;
+  }
+  a.item:hover{text-decoration:underline}
+  li p{
+    color:var(--dim);
+    font-size:14px;
+    margin-top:3px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>trade home</h1>
+
+  <section class="group">
+    <h2>SL2</h2>
+    <ul>
+      <li>
+        <a class="item" href="icon-rescaler.html">Icon Rescaler</a>
+        <p>Batch face crops downscaled to clean icon sizes.</p>
+      </li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>
