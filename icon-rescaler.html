@@ -276,6 +276,9 @@ var linear = true;
 // 1024 leaves normal (<=1k) art untouched.
 var RENDER_CAP = 1024;
 
+// Hard ceiling on how many images can be loaded at once.
+var MAX_IMAGES = 150;
+
 function $(id){ return document.getElementById(id); }
 
 /* One-time, high-quality stepped downscale used to build the working source. */
@@ -852,6 +855,13 @@ function load(files){
     return /^image\//.test(f.type);
   });
   if (!list.length){ setStatus("No usable image"); return; }
+
+  // Enforce the 150-image cap: take only what fits, report the rest.
+  var room = MAX_IMAGES - items.length;
+  if (room <= 0){ setStatus("Limit reached — " + MAX_IMAGES + " images max"); return; }
+  var overflow = 0;
+  if (list.length > room){ overflow = list.length - room; list = list.slice(0, room); }
+
   var pending = list.length, added = 0, bad = 0;
 
   list.forEach(function(f){
@@ -868,11 +878,16 @@ function load(files){
         rsc = RENDER_CAP / maxSide;
         rsrc = downscale(img, iw, ih, Math.max(1, Math.round(iw * rsc)), Math.max(1, Math.round(ih * rsc)));
       }
+      var thumb = makeThumbCanvas(img, iw, ih);
       var min = Math.min(iw, ih);
       var s = min * 0.55;
+      // Oversized images render/display entirely from the 1024 copy + thumb, so
+      // drop the full-res original to keep memory sane with big batches.
+      var oversized = rsc < 1;
       items.push({
-        img: img, url: url, rsrc: rsrc, rsc: rsc,
-        thumbCanvas: makeThumbCanvas(img, iw, ih),
+        img: oversized ? null : img,
+        url: oversized ? null : url,
+        rsrc: rsrc, rsc: rsc, thumbCanvas: thumb,
         w: iw, h: ih,
         crop: {
           x: (iw - s) / 2,
@@ -881,6 +896,7 @@ function load(files){
         },
         include: true, canvas: null, broken: false, dirty: true
       });
+      if (oversized) URL.revokeObjectURL(url);
       added++; done();
     };
     img.onerror = function(){ URL.revokeObjectURL(url); bad++; done(); };
@@ -892,7 +908,12 @@ function load(files){
     if (active < 0 && items.length) select(0);
     drawList();
     drawStrip();            // creates placeholders and queues the new items to render
-    if (bad) setStatus(added + " added, " + bad + " failed");
+    if (bad || overflow){
+      var extra = [];
+      if (bad) extra.push(bad + " failed");
+      if (overflow) extra.push(overflow + " over " + MAX_IMAGES + "-image limit");
+      setStatus(added + " added, " + extra.join(", "));
+    }
   }
 }
 
