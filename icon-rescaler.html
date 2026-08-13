@@ -73,8 +73,6 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 .item{
   display:flex;gap:7px;align-items:center;width:100%;
   padding:4px 5px;border:1px solid transparent;border-radius:4px;margin-bottom:2px;
-  /* skip rendering rows scrolled out of the queue */
-  content-visibility:auto;contain-intrinsic-size:auto 152px auto 44px;
 }
 .item:hover{background:var(--panel2)}
 .item.sel{background:rgba(224,163,64,.13);border-color:rgba(224,163,64,.55)}
@@ -83,8 +81,8 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
   display:flex;gap:9px;align-items:center;flex:1;min-width:0;text-align:left;
   background:none;border:none;color:var(--text);cursor:pointer;padding:1px;
 }
-.item img{
-  width:34px;height:34px;object-fit:cover;flex:0 0 34px;border-radius:2px;
+.item canvas.thumb{
+  width:34px;height:34px;flex:0 0 34px;border-radius:2px;
   background:#15181b;border:1px solid var(--line);
 }
 .item .n{font:11px/1 var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -163,11 +161,7 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
   margin:0 0 9px;color:var(--dim);
 }
 .strip .row{display:flex;gap:9px;overflow-x:auto;min-height:108px;align-items:flex-start;padding-bottom:3px}
-.cell{
-  flex:0 0 auto;text-align:center;cursor:pointer;
-  /* the big one: don't paint preview canvases that are scrolled off-screen */
-  content-visibility:auto;contain-intrinsic-size:auto 104px auto 126px;
-}
+.cell{flex:0 0 auto;text-align:center;cursor:pointer}
 .cell canvas{
   display:block;border:1px solid var(--line2);border-radius:2px;image-rendering:pixelated;
   background-color:var(--ck2);
@@ -308,6 +302,29 @@ function downscale(img, sw, sh, dw, dh){
     cur = f;
   }
   return cur;
+}
+
+/* Small center-square canvas for the queue list. Drawn once so scrolling the
+   side list never re-decodes the (possibly huge) source images. */
+function makeThumbCanvas(img, iw, ih){
+  var TS = 68; // 2x, displayed at 34px
+  var c = document.createElement("canvas");
+  c.className = "thumb";
+  c.width = TS; c.height = TS;
+  var g = c.getContext("2d");
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "medium";
+  var side = Math.min(iw, ih);
+  g.drawImage(img, (iw - side) / 2, (ih - side) / 2, side, side, 0, 0, TS, TS);
+  return c;
+}
+
+/* Source shown in the stage. For oversized images use the pre-shrunk 1024 copy
+   so selecting doesn't decode a multi-thousand-pixel original every click.
+   Crop math stays in original pixel space, so this only changes display cost. */
+function dispSrc(it){
+  if (!it.rsc || it.rsc >= 1) return it.url;
+  if (!it.disp) it.disp = it.rsrc.toDataURL("image/png");
+  return it.disp;
 }
 
 function setStatus(t){ $("status").textContent = t; }
@@ -591,7 +608,7 @@ function removeItem(i){
     var a = items[active];
     $("blank").classList.add("hide");
     $("holder").classList.remove("hide");
-    $("pic").src = a.url;
+    $("pic").src = dispSrc(a);
     $("inc").checked = a.include;
     requestAnimationFrame(place);
   } else {
@@ -624,14 +641,10 @@ function drawList(){
 
     var pick = document.createElement("button");
     pick.className = "pick";
-    var im = document.createElement("img");
-    im.decoding = "async";
-    im.loading = "lazy";
-    im.src = it.url;
     var n = document.createElement("span");
     n.className = "n";
     n.textContent = it.w + " x " + it.h;
-    pick.appendChild(im); pick.appendChild(n);
+    pick.appendChild(it.thumbCanvas); pick.appendChild(n);
     pick.addEventListener("click", function(){ select(i); });
 
     var x = document.createElement("button");
@@ -694,7 +707,7 @@ function select(i){
   active = i;
   $("blank").classList.add("hide");
   $("holder").classList.remove("hide");
-  $("pic").src = it.url;
+  $("pic").src = dispSrc(it);
   $("inc").checked = it.include;
 
   /* Only move the highlight between the two affected rows/cells. Rebuilding the
@@ -859,6 +872,7 @@ function load(files){
       var s = min * 0.55;
       items.push({
         img: img, url: url, rsrc: rsrc, rsc: rsc,
+        thumbCanvas: makeThumbCanvas(img, iw, ih),
         w: iw, h: ih,
         crop: {
           x: (iw - s) / 2,
