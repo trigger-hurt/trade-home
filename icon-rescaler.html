@@ -98,7 +98,7 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 
 .stage{
   flex:1;position:relative;min-height:0;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:safe center;justify-content:safe center;
   padding:18px;overflow:hidden;
   background-color:var(--stage);
   background-image:
@@ -109,12 +109,11 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
   background-size:16px 16px;
   background-position:0 0,0 8px,8px -8px,-8px 0;
 }
-.stage.zoomed{justify-content:flex-start;align-items:flex-start}
 .holder{
   position:relative;line-height:0;max-width:100%;max-height:100%;
   box-shadow:0 6px 30px rgba(0,0,0,.55);
 }
-.stage.zoomed .holder{max-width:none;max-height:none;margin:auto}
+.stage.zoomed .holder{max-width:none;max-height:none}
 .holder img{display:block;user-select:none;-webkit-user-drag:none}
 .dim{position:absolute;background:rgba(9,11,14,.66);pointer-events:none}
 .box{position:absolute;border:1px solid var(--accent);cursor:move}
@@ -906,8 +905,10 @@ function fit(){
   img.style.height = Math.max(1, Math.round(it.h * k)) + "px";
   // Rotate the whole holder so the crop box + veils stay glued to the image.
   $("holder").style.transform = rot ? "rotate(" + rot + "deg)" : "";
-  st.style.overflow = zoom > 1 ? "auto" : "hidden";
-  st.classList.toggle("zoomed", zoom > 1);   // anchor top-left so panning reaches edges
+  // Always scrollable (no hidden<->auto jump), and let the holder exceed the
+  // stage only when zoomed. safe-center handles fit vs overflow alignment.
+  st.style.overflow = "auto";
+  st.classList.toggle("zoomed", zoom > 1);
 }
 
 function panel(el, x, y, w, h){
@@ -1176,11 +1177,40 @@ $("rotSeg").addEventListener("click", function(e){
 });
 
 /* Zoom is a pure view control — enlarges the stage, never re-renders output. */
+function applyZoom(z){
+  z = Math.min(6, Math.max(1, z));
+  zoom = z;
+  var pct = Math.round(z * 100);
+  $("zoom").value = pct;                       // thumb may snap to step; label stays exact
+  $("zoomV").textContent = pct === 100 ? "Fit" : (pct + "%");
+}
+
 $("zoom").addEventListener("input", function(){
-  zoom = this.value / 100;
-  $("zoomV").textContent = this.value === "100" ? "Fit" : (this.value + "%");
+  applyZoom(this.value / 100);
   if (active >= 0) place();
 });
+
+/* Scroll-wheel zoom, anchored to the cursor so it zooms toward what you point at. */
+$("stage").addEventListener("wheel", function(e){
+  if (active < 0) return;
+  e.preventDefault();
+  var it = items[active], stage = this, pic = $("pic");
+  // Cursor position as a fraction of the image's own on-screen box.
+  var pr = pic.getBoundingClientRect();
+  var rx = (e.clientX - pr.left) / (pr.width || 1);
+  var ry = (e.clientY - pr.top) / (pr.height || 1);
+  var before = zoom;
+  applyZoom(zoom * (e.deltaY < 0 ? 1.15 : 1/1.15));
+  if (zoom === before) return;
+  place();
+  // Scroll so the same fraction stays under the cursor (skip when rotated —
+  // the rotated bounding box makes this mapping ambiguous).
+  if ((it.rot || 0) === 0){
+    var pr2 = pic.getBoundingClientRect();
+    stage.scrollLeft += pr2.left - (e.clientX - rx * pic.clientWidth);
+    stage.scrollTop  += pr2.top  - (e.clientY - ry * pic.clientHeight);
+  }
+}, { passive: false });
 
 $("colSeg").addEventListener("click", function(e){
   var b = e.target.closest("button");
