@@ -497,11 +497,20 @@ function paletteFor(it, bytes){
   return medianCut(sampleBytes(bytes, outSize), MAX_COLORS);
 }
 
+/* Spread one pixel's quantisation error to a neighbour (Floyd–Steinberg). */
+function diffuseErr(work, x, y, w, h, er, eg, eb, f){
+  if (x < 0 || x >= w || y < 0 || y >= h) return;
+  var wi = (y * w + x) * 3;
+  work[wi] += er * f; work[wi+1] += eg * f; work[wi+2] += eb * f;
+}
+
 /* Quantise an assembled (non-square) sheet to one shared <=MAX_COLORS palette,
-   in place. Per-image reduction can't bound a multi-icon sheet — each icon keeps
-   its own <=255 colours, so the sheet sums to thousands and the PNG barely
-   compresses. Building one palette from the whole sheet lands it at <=255 total,
-   matching a Dream-Maker-assembled .dmi's size. Alpha is left untouched. */
+   in place, with Floyd–Steinberg dithering. Per-image reduction can't bound a
+   multi-icon sheet — each icon keeps its own <=255 colours, so the sheet sums to
+   thousands and the PNG barely compresses. Building one palette from the whole
+   sheet lands it at <=255 total (matching a Dream-Maker-assembled .dmi's size);
+   dithering diffuses the rounding error so those 255 colours read as many more
+   instead of banding. Alpha is left untouched. */
 function quantizeSheetShared(sctx, w, h){
   var img = sctx.getImageData(0, 0, w, h);
   var bytes = img.data, total = w * h;
@@ -512,23 +521,33 @@ function quantizeSheetShared(sctx, w, h){
     samples.push([bytes[o], bytes[o+1], bytes[o+2]]);
   }
   if (!samples.length) return;
-  var pal = medianCut(samples, MAX_COLORS), cache = {};
-  for (var j = 0; j < total; j++){
-    var p = j * 4;
-    if (bytes[p+3] === 0) continue;
-    var r = bytes[p], g = bytes[p+1], b = bytes[p+2];
-    var key = ((r>>2)<<12) | ((g>>2)<<6) | (b>>2);
-    var idx = cache[key];
-    if (idx === undefined){
+  var pal = medianCut(samples, MAX_COLORS);
+  // Float working copy of RGB so diffused error can accumulate past 0..255.
+  var work = new Float32Array(total * 3);
+  for (var k = 0; k < total; k++){
+    var s = k * 4, t = k * 3;
+    work[t] = bytes[s]; work[t+1] = bytes[s+1]; work[t+2] = bytes[s+2];
+  }
+  for (var y = 0; y < h; y++){
+    for (var x = 0; x < w; x++){
+      var idx = y * w + x;
+      if (bytes[idx*4+3] === 0) continue;                 // fully transparent: skip
+      var wi = idx * 3;
+      var r = work[wi], g = work[wi+1], b = work[wi+2];
       var bestD = Infinity, bestI = 0;
       for (var q = 0; q < pal.length; q++){
         var dr=r-pal[q][0], dg=g-pal[q][1], db=b-pal[q][2];
         var dd = dr*dr+dg*dg+db*db;
         if (dd < bestD){ bestD = dd; bestI = q; }
       }
-      idx = bestI; cache[key] = idx;
+      var pr = pal[bestI][0], pg = pal[bestI][1], pb = pal[bestI][2];
+      bytes[idx*4] = pr; bytes[idx*4+1] = pg; bytes[idx*4+2] = pb;
+      var er = r-pr, eg = g-pg, eb = b-pb;
+      diffuseErr(work, x+1, y,   w, h, er, eg, eb, 7/16);
+      diffuseErr(work, x-1, y+1, w, h, er, eg, eb, 3/16);
+      diffuseErr(work, x,   y+1, w, h, er, eg, eb, 5/16);
+      diffuseErr(work, x+1, y+1, w, h, er, eg, eb, 1/16);
     }
-    bytes[p] = pal[idx][0]; bytes[p+1] = pal[idx][1]; bytes[p+2] = pal[idx][2];
   }
   sctx.putImageData(img, 0, 0);
 }
