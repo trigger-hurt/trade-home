@@ -276,6 +276,16 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
             <button data-p="per" class="on">Per img</button><button data-p="all">Shared</button>
           </div>
         </div>
+        <div class="ctl">
+          <label>Transparency</label>
+          <div class="seg" id="alphaSeg">
+            <button data-a="0" class="on">Keep</button><button data-a="1">Remove</button>
+          </div>
+          <div class="seg" id="alphaAll">
+            <button data-aa="1" title="Remove on every image">All</button><button data-aa="0" title="Keep on every image">None</button>
+          </div>
+          <span class="val" id="alphaV"></span>
+        </div>
         <label class="chk"><input type="checkbox" id="inc" checked> Include</label>
       </div>
 
@@ -362,6 +372,21 @@ function dispSrc(it){
   if (!it.rsc || it.rsc >= 1) return it.url;
   if (!it.disp) it.disp = it.rsrc.toDataURL("image/png");
   return it.disp;
+}
+
+/* Detect whether an image actually carries transparency (any pixel < ~fully
+   opaque). Cheap 64x64 scan, once on load. */
+function detectAlpha(img, iw, ih){
+  var N = 64;
+  var c = document.createElement("canvas");
+  c.width = N; c.height = N;
+  var g = c.getContext("2d", { willReadFrequently: true });
+  try {
+    g.drawImage(img, 0, 0, iw, ih, 0, 0, N, N);
+    var d = g.getImageData(0, 0, N, N).data;
+    for (var i = 3; i < d.length; i += 4){ if (d[i] < 250) return true; }
+  } catch (e){}
+  return false;
 }
 
 /* Rotate a square RGBA buffer by 90/180/270 degrees clockwise. Lossless. */
@@ -695,6 +720,9 @@ function render(it){
   sharpenPass(px, outSize, outSize, sharpen, clamped);
   var bytes = toBytes(px, outSize, outSize, linear);
 
+  // Flatten first so "remove transparency" makes the image fully opaque; this
+  // also lets the 255-colour reduction reach a true <=255 (no alpha variants).
+  if (it.flatten){ for (var ai = 3; ai < bytes.length; ai += 4) bytes[ai] = 255; }
   if (reduceColors) remapToPalette(bytes, outSize, paletteFor(it, bytes));
 
   var out = it.canvas || document.createElement("canvas");
@@ -783,6 +811,7 @@ function removeItem(i){
     $("inc").checked = a.include;
     $("rotV").textContent = (a.rot || 0) + "°";
     $("rotSlider").value = Math.round((((a.rot || 0) % 360) + 360) % 360);
+    showAlpha(a);
     requestAnimationFrame(place);
   } else {
     $("holder").classList.add("hide");
@@ -885,6 +914,7 @@ function select(i){
   $("inc").checked = it.include;
   $("rotV").textContent = (it.rot || 0) + "°";
   $("rotSlider").value = Math.round((((it.rot || 0) % 360) + 360) % 360);
+  showAlpha(it);
 
   /* Only move the highlight between the two affected rows/cells. Rebuilding the
      whole queue + strip on every click was what made switching lag with many
@@ -1060,6 +1090,7 @@ function load(files){
         rsrc = downscale(img, iw, ih, Math.max(1, Math.round(iw * rsc)), Math.max(1, Math.round(ih * rsc)));
       }
       var thumb = makeThumbCanvas(img, iw, ih);
+      var hasAlpha = detectAlpha(img, iw, ih);
       var min = Math.min(iw, ih);
       var s = min * 0.55;
       // Oversized images render/display entirely from the 1024 copy + thumb, so
@@ -1069,7 +1100,7 @@ function load(files){
         img: oversized ? null : img,
         url: oversized ? null : url,
         rsrc: rsrc, rsc: rsc, thumbCanvas: thumb,
-        w: iw, h: ih, rot: 0,
+        w: iw, h: ih, rot: 0, flatten: false, hasAlpha: hasAlpha,
         crop: {
           x: (iw - s) / 2,
           y: Math.max(0, (ih - s) * 0.28),
@@ -1292,6 +1323,35 @@ $("palSeg").addEventListener("click", function(e){
   paletteScope = b.dataset.p;
   sharedPalette = null;
   if (reduceColors) renderAll();
+});
+
+/* Transparency: per-image Keep/Remove, plus All/None across the batch. The
+   detection tag shows whether the active image actually has any alpha. */
+function showAlpha(it){
+  var seg = $("alphaSeg").children;
+  var flat = !!(it && it.flatten);
+  seg[0].classList.toggle("on", !flat);
+  seg[1].classList.toggle("on", flat);
+  $("alphaV").textContent = it ? (it.hasAlpha ? "has α" : "opaque") : "";
+}
+$("alphaSeg").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  var it = items[active];
+  if (!it) return;
+  it.flatten = b.dataset.a === "1";
+  showAlpha(it);
+  try { render(it); } catch (err){ it.broken = true; setStatus(err.message); }
+  if (reduceColors && paletteScope === "all") sharedPalette = null;
+});
+$("alphaAll").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  var val = b.dataset.aa === "1";
+  items.forEach(function(it){ it.flatten = val; });
+  if (items[active]) showAlpha(items[active]);
+  sharedPalette = null;
+  renderAll();
 });
 
 window.addEventListener("resize", function(){ if (active >= 0) place(); });
