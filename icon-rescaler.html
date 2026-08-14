@@ -117,8 +117,12 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 .stage.panning{cursor:grabbing}
 .stage.panning *{cursor:grabbing !important}
 .holder img{display:block;user-select:none;-webkit-user-drag:none}
-.dim{position:absolute;background:rgba(9,11,14,.66);pointer-events:none}
-.box{position:absolute;border:1px solid var(--accent);cursor:move}
+.dim{display:none}
+.box{
+  position:absolute;border:1px solid var(--accent);cursor:move;
+  transform-origin:center;
+  box-shadow:0 0 0 4000px rgba(9,11,14,.62);   /* dims outside the (rotatable) box */
+}
 .box::before{
   content:"";position:absolute;inset:0;pointer-events:none;
   background-image:linear-gradient(var(--accent) 1px,transparent 1px),
@@ -253,8 +257,9 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
         <div class="ctl">
           <label>Rotate</label>
           <div class="seg" id="rotSeg">
-            <button data-r="-90" title="Rotate left">&#8634;</button><button data-r="90" title="Rotate right">&#8635;</button><button data-r="180" title="Flip 180&deg;">180&deg;</button>
+            <button data-r="-90" title="Rotate left 90&deg;">&#8634;</button><button data-r="90" title="Rotate right 90&deg;">&#8635;</button><button data-r="180" title="Flip 180&deg;">180&deg;</button><button data-r="reset" title="Reset to 0&deg;">0</button>
           </div>
+          <input type="range" id="rotSlider" min="0" max="359" step="1" value="0" title="Custom angle">
           <span class="val" id="rotV">0&deg;</span>
         </div>
         <div class="ctl">
@@ -644,11 +649,23 @@ function render(it){
   var rsc = it.rsc || 1;
   var src = it.rsrc || it.img;
   var s = Math.max(1, Math.round(c.s * rsc));
-  var sx = Math.round(c.x * rsc), sy = Math.round(c.y * rsc);
   var cut = document.createElement("canvas");
   cut.width = s; cut.height = s;
   var cx = cut.getContext("2d", { willReadFrequently: true });
-  cx.drawImage(src, sx, sy, s, s, 0, 0, s, s);
+  var th = (it.rot || 0) * Math.PI / 180;
+  if (th){
+    // Sample a rotated square: spin the source about the crop centre so the
+    // tilted selection lands upright in the output (fills, no empty corners).
+    var ccx = (c.x + c.s / 2) * rsc, ccy = (c.y + c.s / 2) * rsc;
+    cx.save();
+    cx.translate(s / 2, s / 2);
+    cx.rotate(-th);
+    cx.translate(-ccx, -ccy);
+    cx.drawImage(src, 0, 0);
+    cx.restore();
+  } else {
+    cx.drawImage(src, Math.round(c.x * rsc), Math.round(c.y * rsc), s, s, 0, 0, s, s);
+  }
 
   var cur = s;
   while (cur > 1024){
@@ -678,7 +695,6 @@ function render(it){
   sharpenPass(px, outSize, outSize, sharpen, clamped);
   var bytes = toBytes(px, outSize, outSize, linear);
 
-  if (it.rot) bytes = rotateSquare(bytes, outSize, it.rot);
   if (reduceColors) remapToPalette(bytes, outSize, paletteFor(it, bytes));
 
   var out = it.canvas || document.createElement("canvas");
@@ -766,6 +782,7 @@ function removeItem(i){
     $("pic").src = dispSrc(a);
     $("inc").checked = a.include;
     $("rotV").textContent = (a.rot || 0) + "°";
+    $("rotSlider").value = Math.round((((a.rot || 0) % 360) + 360) % 360);
     requestAnimationFrame(place);
   } else {
     $("holder").classList.add("hide");
@@ -867,6 +884,7 @@ function select(i){
   $("pic").src = dispSrc(it);
   $("inc").checked = it.include;
   $("rotV").textContent = (it.rot || 0) + "°";
+  $("rotSlider").value = Math.round((((it.rot || 0) % 360) + 360) % 360);
 
   /* Only move the highlight between the two affected rows/cells. Rebuilding the
      whole queue + strip on every click was what made switching lag with many
@@ -893,22 +911,16 @@ function fit(){
   var it = items[active];
   if (!it) return;
   var st = $("stage");
-  var rot = it.rot || 0;
-  var swap = (rot === 90 || rot === 270);
-  var effW = swap ? it.h : it.w;          // on-screen footprint after rotation
-  var effH = swap ? it.w : it.h;
   var aw = Math.max(80, st.clientWidth - 32);
   var ah = Math.max(80, st.clientHeight - 32);
-  var base = Math.min(aw / effW, ah / effH, 1);
+  var base = Math.min(aw / it.w, ah / it.h, 1);
   if (!isFinite(base) || base <= 0) base = 1;
   var k = base * zoom;                     // zoom enlarges beyond the fit scale
   var img = $("pic");
   img.style.width = Math.max(1, Math.round(it.w * k)) + "px";
   img.style.height = Math.max(1, Math.round(it.h * k)) + "px";
-  // Rotate the whole holder so the crop box + veils stay glued to the image.
-  $("holder").style.transform = rot ? "rotate(" + rot + "deg)" : "";
-  // Always scrollable (no hidden<->auto jump), and let the holder exceed the
-  // stage only when zoomed. safe-center handles fit vs overflow alignment.
+  // Always scrollable (no hidden<->auto jump); the holder exceeds the stage
+  // only when zoomed. safe-center handles fit vs overflow alignment.
   st.style.overflow = "auto";
   st.classList.toggle("zoomed", zoom > 1);
 }
@@ -922,16 +934,13 @@ function place(){
   var it = items[active];
   if (!it) return;
   fit();
-  var k = scale(), c = it.crop, img = $("pic");
-  var dw = img.clientWidth, dh = img.clientHeight;
+  var k = scale(), c = it.crop;
   var x = c.x * k, y = c.y * k, s = c.s * k;
   var el = $("box");
   el.style.left = x + "px"; el.style.top = y + "px";
   el.style.width = s + "px"; el.style.height = s + "px";
-  panel($("dT"), 0, 0, dw, y);
-  panel($("dB"), 0, y + s, dw, dh - (y + s));
-  panel($("dL"), 0, y, x, s);
-  panel($("dR"), x + s, y, dw - (x + s), s);
+  // Rotate the selection box in place; its box-shadow dims everything outside.
+  el.style.transform = it.rot ? "rotate(" + it.rot + "deg)" : "";
   $("crop").value = Math.min(100, Math.max(5, Math.round(c.s / Math.min(it.w, it.h) * 100)));
   $("cropV").textContent = Math.round(c.s) + "px";
 }
@@ -971,29 +980,28 @@ function commit(){
     if (!mode) return;
     var it = items[active];
     var k = scale();
-    var sdx = (e.clientX - start.mx) / k;
+    var sdx = (e.clientX - start.mx) / k;   // drag delta in image pixels (upright)
     var sdy = (e.clientY - start.my) / k;
-    // Undo the holder rotation so movement maps to the image's own axes.
-    var rot = it.rot || 0, dx, dy;
-    if (rot === 90){ dx = sdy; dy = -sdx; }
-    else if (rot === 180){ dx = -sdx; dy = -sdy; }
-    else if (rot === 270){ dx = -sdy; dy = sdx; }
-    else { dx = sdx; dy = sdy; }
     if (mode === "move"){
-      it.crop.x = start.c.x + dx;
-      it.crop.y = start.c.y + dy;
+      // Image is upright, so the box just follows the cursor.
+      it.crop.x = start.c.x + sdx;
+      it.crop.y = start.c.y + sdy;
     } else {
-      var d = grip === "se" ? (dx + dy) / 2
-            : grip === "nw" ? -(dx + dy) / 2
-            : grip === "ne" ? (dx - dy) / 2
-            : (dy - dx) / 2;
+      // Resize a (possibly rotated) square from its centre. Map the screen drag
+      // into the box's own axes so grips feel right at any angle.
+      var th = (it.rot || 0) * Math.PI / 180, ct = Math.cos(th), stt = Math.sin(th);
+      var ldx = sdx * ct + sdy * stt;
+      var ldy = -sdx * stt + sdy * ct;
+      var d = grip === "se" ? (ldx + ldy) / 2
+            : grip === "nw" ? -(ldx + ldy) / 2
+            : grip === "ne" ? (ldx - ldy) / 2
+            : (ldy - ldx) / 2;
       var max = Math.min(it.w, it.h);
       var ns = Math.max(8, Math.min(max, start.c.s + d));
-      var delta = ns - start.c.s;
+      var ccx = start.c.x + start.c.s / 2, ccy = start.c.y + start.c.s / 2;
       it.crop.s = ns;
-      if (grip === "nw"){ it.crop.x = start.c.x - delta; it.crop.y = start.c.y - delta; }
-      if (grip === "ne"){ it.crop.y = start.c.y - delta; }
-      if (grip === "sw"){ it.crop.x = start.c.x - delta; }
+      it.crop.x = ccx - ns / 2;
+      it.crop.y = ccy - ns / 2;
     }
     clampCrop(it);
     place();
@@ -1166,17 +1174,38 @@ $("inc").addEventListener("change", function(){
   if (reduceColors && paletteScope === "all") renderAll();
 });
 
-/* Rotate only the active image (for upside-down / sideways characters). */
+/* Rotate the crop box of the active image — any angle (for tilted / upside-down
+   characters). The box spins live; the output re-renders when a value settles. */
+function showRotation(it){
+  var norm = (((it.rot || 0) % 360) + 360) % 360;
+  $("rotV").textContent = Math.round(norm) + "°";
+  if (+$("rotSlider").value !== Math.round(norm)) $("rotSlider").value = Math.round(norm);
+  place();
+}
+function commitRotation(it){
+  it.rot = (((it.rot || 0) % 360) + 360) % 360;
+  showRotation(it);
+  try { render(it); } catch (err){ it.broken = true; setStatus(err.message); }
+  if (reduceColors && paletteScope === "all") sharedPalette = null;
+}
 $("rotSeg").addEventListener("click", function(e){
   var b = e.target.closest("button");
   if (!b) return;
   var it = items[active];
   if (!it) return;
-  it.rot = (((it.rot || 0) + parseInt(b.dataset.r, 10)) % 360 + 360) % 360;
+  it.rot = b.dataset.r === "reset" ? 0 : (it.rot || 0) + parseInt(b.dataset.r, 10);
+  commitRotation(it);
+});
+$("rotSlider").addEventListener("input", function(){
+  var it = items[active];
+  if (!it) return;
+  it.rot = parseInt(this.value, 10);       // spin the box live, no re-render yet
   $("rotV").textContent = it.rot + "°";
   place();
-  try { render(it); } catch (err){ it.broken = true; setStatus(err.message); }
-  if (reduceColors && paletteScope === "all") sharedPalette = null;
+});
+$("rotSlider").addEventListener("change", function(){
+  var it = items[active];
+  if (it) commitRotation(it);              // render the output on release
 });
 
 /* Zoom is a pure view control — enlarges the stage, never re-renders output. */
@@ -1206,13 +1235,10 @@ $("stage").addEventListener("wheel", function(e){
   applyZoom(zoom * (e.deltaY < 0 ? 1.15 : 1/1.15));
   if (zoom === before) return;
   place();
-  // Scroll so the same fraction stays under the cursor (skip when rotated —
-  // the rotated bounding box makes this mapping ambiguous).
-  if ((it.rot || 0) === 0){
-    var pr2 = pic.getBoundingClientRect();
-    stage.scrollLeft += pr2.left - (e.clientX - rx * pic.clientWidth);
-    stage.scrollTop  += pr2.top  - (e.clientY - ry * pic.clientHeight);
-  }
+  // Keep the same fraction under the cursor (image is always upright now).
+  var pr2 = pic.getBoundingClientRect();
+  stage.scrollLeft += pr2.left - (e.clientX - rx * pic.clientWidth);
+  stage.scrollTop  += pr2.top  - (e.clientY - ry * pic.clientHeight);
 }, { passive: false });
 
 /* Middle-mouse drag pans the stage (move the camera around a zoomed image). */
