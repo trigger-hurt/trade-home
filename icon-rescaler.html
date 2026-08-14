@@ -497,61 +497,6 @@ function paletteFor(it, bytes){
   return medianCut(sampleBytes(bytes, outSize), MAX_COLORS);
 }
 
-/* Spread one pixel's quantisation error to a neighbour (Floyd–Steinberg). */
-function diffuseErr(work, x, y, w, h, er, eg, eb, f){
-  if (x < 0 || x >= w || y < 0 || y >= h) return;
-  var wi = (y * w + x) * 3;
-  work[wi] += er * f; work[wi+1] += eg * f; work[wi+2] += eb * f;
-}
-
-/* Quantise an assembled (non-square) sheet to one shared <=MAX_COLORS palette,
-   in place, with Floyd–Steinberg dithering. Per-image reduction can't bound a
-   multi-icon sheet — each icon keeps its own <=255 colours, so the sheet sums to
-   thousands and the PNG barely compresses. Building one palette from the whole
-   sheet lands it at <=255 total (matching a Dream-Maker-assembled .dmi's size);
-   dithering diffuses the rounding error so those 255 colours read as many more
-   instead of banding. Alpha is left untouched. */
-function quantizeSheetShared(sctx, w, h){
-  var img = sctx.getImageData(0, 0, w, h);
-  var bytes = img.data, total = w * h;
-  var stride = Math.max(1, Math.floor(total / 4096)), samples = [];
-  for (var i = 0; i < total; i += stride){
-    var o = i * 4;
-    if (bytes[o+3] < 8) continue;
-    samples.push([bytes[o], bytes[o+1], bytes[o+2]]);
-  }
-  if (!samples.length) return;
-  var pal = medianCut(samples, MAX_COLORS);
-  // Float working copy of RGB so diffused error can accumulate past 0..255.
-  var work = new Float32Array(total * 3);
-  for (var k = 0; k < total; k++){
-    var s = k * 4, t = k * 3;
-    work[t] = bytes[s]; work[t+1] = bytes[s+1]; work[t+2] = bytes[s+2];
-  }
-  for (var y = 0; y < h; y++){
-    for (var x = 0; x < w; x++){
-      var idx = y * w + x;
-      if (bytes[idx*4+3] === 0) continue;                 // fully transparent: skip
-      var wi = idx * 3;
-      var r = work[wi], g = work[wi+1], b = work[wi+2];
-      var bestD = Infinity, bestI = 0;
-      for (var q = 0; q < pal.length; q++){
-        var dr=r-pal[q][0], dg=g-pal[q][1], db=b-pal[q][2];
-        var dd = dr*dr+dg*dg+db*db;
-        if (dd < bestD){ bestD = dd; bestI = q; }
-      }
-      var pr = pal[bestI][0], pg = pal[bestI][1], pb = pal[bestI][2];
-      bytes[idx*4] = pr; bytes[idx*4+1] = pg; bytes[idx*4+2] = pb;
-      var er = r-pr, eg = g-pg, eb = b-pb;
-      diffuseErr(work, x+1, y,   w, h, er, eg, eb, 7/16);
-      diffuseErr(work, x-1, y+1, w, h, er, eg, eb, 3/16);
-      diffuseErr(work, x,   y+1, w, h, er, eg, eb, 5/16);
-      diffuseErr(work, x+1, y+1, w, h, er, eg, eb, 1/16);
-    }
-  }
-  sctx.putImageData(img, 0, 0);
-}
-
 function remapToPalette(bytes, n, pal){
   if (!pal || !pal.length) return;
   var cache = {};
@@ -1602,6 +1547,85 @@ function uniqueStateNames(list){
   return out;
 }
 
+/* Real DEFLATE via the browser (zlib-wrapped — exactly what PNG IDAT wants).
+   Falls back to an uncompressed-but-valid zlib stream if unavailable. */
+function deflateZlib(bytes){
+  if (typeof CompressionStream === "undefined") return Promise.resolve(zlibStore(bytes));
+  var cs = new CompressionStream("deflate");
+  var w = cs.writable.getWriter();
+  w.write(bytes); w.close();
+  return new Response(cs.readable).arrayBuffer().then(function(ab){ return new Uint8Array(ab); });
+}
+
+/* Encode a full sheet as an INDEXED (PNG-8) .dmi — the compact format Dream
+   Maker writes, ~1/3 the size of 32-bit RGBA for <=255 colours. Binary
+   transparency via a reserved palette slot 0 + tRNS. */
+function encodeIndexedDmi(imgData, w, h, descText){
+  var bytes = imgData.data, total = w * h, i, q;
+  var hasTrans = false;
+  for (i = 0; i < total; i++){ if (bytes[i*4+3] < 128){ hasTrans = true; break; } }
+
+  var stride = Math.max(1, Math.floor(total / 4096)), samples = [];
+  for (i = 0; i < total; i += stride){
+    var so = i*4; if (bytes[so+3] < 128) continue;
+    samples.push([bytes[so], bytes[so+1], bytes[so+2]]);
+  }
+  var room = hasTrans ? MAX_COLORS - 1 : MAX_COLORS;
+  var pal = samples.length ? medianCut(samples, Math.max(1, room)) : [[0,0,0]];
+
+  var plte = [], off = 0;
+  if (hasTrans){ plte.push([0,0,0]); off = 1; }          // index 0 reserved = transparent
+  for (q = 0; q < pal.length; q++) plte.push(pal[q]);
+
+  var idx = new Uint8Array(total), cache = {};
+  for (i = 0; i < total; i++){
+    var o = i*4;
+    if (bytes[o+3] < 128){ idx[i] = 0; continue; }
+    var r = bytes[o], g = bytes[o+1], b = bytes[o+2];
+    var key = (r<<16)|(g<<8)|b, hit = cache[key];
+    if (hit === undefined){
+      var bestD = Infinity, bestI = 0;
+      for (q = 0; q < pal.length; q++){
+        var dr=r-pal[q][0], dg=g-pal[q][1], db=b-pal[q][2], dd=dr*dr+dg*dg+db*db;
+        if (dd < bestD){ bestD = dd; bestI = q; }
+      }
+      hit = bestI + off; cache[key] = hit;
+    }
+    idx[i] = hit;
+  }
+
+  // Scanlines, filter 0 (None) — the spec's recommendation for palette images.
+  var raw = new Uint8Array(h * (w + 1));
+  for (var y = 0; y < h; y++){ raw[y*(w+1)] = 0; raw.set(idx.subarray(y*w, (y+1)*w), y*(w+1)+1); }
+
+  var ihdr = new Uint8Array(13);
+  var dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w, false); dv.setUint32(4, h, false);
+  ihdr[8] = 8; ihdr[9] = 3;                               // 8-bit, colortype 3 (indexed)
+
+  var plteBytes = new Uint8Array(plte.length * 3);
+  for (i = 0; i < plte.length; i++){ plteBytes[i*3]=plte[i][0]; plteBytes[i*3+1]=plte[i][1]; plteBytes[i*3+2]=plte[i][2]; }
+
+  return deflateZlib(raw).then(function(idatData){
+    var kw = new TextEncoder().encode("Description");
+    var comp = zlibStore(new TextEncoder().encode(descText));
+    var desc = new Uint8Array(kw.length + 2 + comp.length);
+    desc.set(kw, 0); desc.set(comp, kw.length + 2);       // [kw]\0\0[zlib]
+
+    var parts = [ new Uint8Array([137,80,78,71,13,10,26,10]),
+                  pngChunk("IHDR", ihdr), pngChunk("PLTE", plteBytes) ];
+    if (hasTrans) parts.push(pngChunk("tRNS", new Uint8Array([0])));  // slot 0 fully transparent
+    parts.push(pngChunk("zTXt", desc));                   // before IDAT, as BYOND requires
+    parts.push(pngChunk("IDAT", idatData));
+    parts.push(pngChunk("IEND", new Uint8Array(0)));
+
+    var len = parts.reduce(function(a,p){ return a + p.length; }, 0);
+    var out = new Uint8Array(len), pos = 0;
+    parts.forEach(function(p){ out.set(p, pos); pos += p.length; });
+    return out;
+  });
+}
+
 function blobOf(canvas){
   return new Promise(function(res){ canvas.toBlob(res, "image/png"); });
 }
@@ -1687,16 +1711,25 @@ $("saveDmi").addEventListener("click", function(){
       var cv = render(it);
       sctx.drawImage(cv, (i % cols) * W, Math.floor(i / cols) * H);
     });
-    if (reduceColors) quantizeSheetShared(sctx, sheet.width, sheet.height);
-    var names = uniqueStateNames(keep);
-    sheet.toBlob(function(blob){
-      blob.arrayBuffer().then(function(ab){
-        var dmi = pngToDmi(new Uint8Array(ab), dmiDescription(names, W, H));
-        saveBlob(new Blob([dmi], { type: "image/png" }), "icons_" + outSize + ".dmi");
-        btn.disabled = false;
-        setStatus("Exported .dmi — " + keep.length + " states, " + W + "×" + H);
-      });
-    }, "image/png");
+    var desc = dmiDescription(uniqueStateNames(keep), W, H);
+    var finish = function(bytes){
+      saveBlob(new Blob([bytes], { type: "image/png" }), "icons_" + outSize + ".dmi");
+      btn.disabled = false;
+      setStatus("Exported .dmi — " + keep.length + " states, " + W + "×" + H +
+                (reduceColors ? " (indexed, " + (bytes.length/1024|0) + "KB)" : ""));
+    };
+    var fail = function(err){ btn.disabled = false; setStatus("DMI export failed: " + err.message); };
+
+    if (reduceColors){
+      // Compact indexed PNG-8, like a Dream-Maker .dmi (~1/3 the RGBA size).
+      var img = sctx.getImageData(0, 0, sheet.width, sheet.height);
+      encodeIndexedDmi(img, sheet.width, sheet.height, desc).then(finish).catch(fail);
+    } else {
+      // Full colour: 32-bit RGBA (can't index above 256 colours).
+      sheet.toBlob(function(blob){
+        blob.arrayBuffer().then(function(ab){ finish(pngToDmi(new Uint8Array(ab), desc)); }).catch(fail);
+      }, "image/png");
+    }
   } catch (err){
     btn.disabled = false;
     setStatus("DMI export failed: " + err.message);
