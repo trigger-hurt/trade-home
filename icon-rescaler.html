@@ -236,38 +236,38 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
     <div class="modal-card">
       <button class="modal-x" id="helpClose" title="Close">&times;</button>
       <h2>How this works</h2>
-      <p class="lead">Turn a pile of art into clean face icons and drop them into a DMI. Here's the whole thing, control by control.</p>
+      <p class="lead">Make face icons from your art and save them as a DMI. Here's what each part does.</p>
 
-      <h3>Getting images in</h3>
-      <p>Drop image files anywhere on the page, paste one with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or hit <b>Add</b>. They stack, so throw a whole batch in at once (up to 150). Everything you load shows up in the list on the left and as a live, actual-size preview along the bottom.</p>
+      <h3>Adding images</h3>
+      <p>Drag image files onto the page, paste one with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or click <b>Add</b>. You can add a lot at once — up to 150. They show up in the list on the left and along the bottom.</p>
 
-      <h3>Framing the face</h3>
-      <p>Click any image — in the left list or the bottom strip — to work on it. The square on the big image is your crop: <b>drag it</b> to move it over the face, or <b>grab a corner</b> to resize. It stays square, because icons are.</p>
-      <p><b>Rotate</b> — if a character is tilted or upside-down, spin the crop with the rotate buttons (90° each, or 180°) or the slider for any angle. The box turns with it and the icon comes out upright.</p>
-      <p><b>Zoom &amp; pan</b> — roll the mouse wheel over the image to zoom toward your cursor, or use the Zoom slider. When you're zoomed in, hold the <b>middle mouse button</b> and drag to move around.</p>
+      <h3>Picking the face</h3>
+      <p>Click an image to open it. The square on it is your crop. <b>Drag</b> it over the face, or <b>pull a corner</b> to resize. It always stays square.</p>
+      <p><b>Turn it</b> — use the Rotate buttons or slider if a face is sideways or upside-down. It comes out straight.</p>
+      <p><b>Look closer</b> — scroll the mouse wheel to zoom in. Hold the <b>middle mouse button</b> to drag around.</p>
 
-      <h3>The knobs along the bottom</h3>
-      <p><b>Size</b> — how big each icon comes out, 32 up to 256 pixels.</p>
-      <p><b>Sharpen</b> — faces shrunk down a lot go a little soft, so a touch of sharpen brings the linework back. The default is a sensible amount.</p>
-      <p><b>Mode / Mix</b> — fine print for the downscaling math. <i>Clamped</i> keeps bright fringes off hard edges; <i>Linear</i> blends color the technically-correct way. The defaults are good — leave them unless an icon looks off.</p>
-      <p><b>Crop</b> — a slider for the crop size, if you'd rather not drag the corners.</p>
-      <p><b>Include</b> — uncheck to leave the current image out of the export without deleting it.</p>
+      <h3>The settings (bottom row)</h3>
+      <p><b>Size</b> — how big the icon is.</p>
+      <p><b>Sharpen</b> — keeps small faces looking crisp instead of blurry.</p>
+      <p><b>Mode / Mix</b> — leave these alone. The defaults are fine.</p>
+      <p><b>Crop</b> — another way to size the crop box.</p>
+      <p><b>Include</b> — untick to skip an image without deleting it.</p>
 
       <h3>Colors</h3>
-      <p><b>Off</b> keeps full color. <b>On</b> squeezes the palette down, and the number beside it is exactly how many colors you want (1–255) — same idea as compress-or-die. Fewer colors means a smaller file; push it too low and flat art starts to band.</p>
-      <p><b>Per img vs Shared</b> — <i>Per img</i> gives each icon its own best colors (sharpest); <i>Shared</i> builds one palette across the whole set (consistent look). Note that a DMI shares one palette anyway, so this mainly changes the on-screen preview — the exported DMI is always quantized to your exact number.</p>
+      <p><b>Off</b> keeps every color. <b>On</b> uses fewer colors and makes a smaller file. The number beside it is how many colors to keep (1–255). Go too low and flat art starts to look blocky.</p>
+      <p><b>Per img / Shared</b> only changes the preview on screen. The DMI always uses your number.</p>
 
       <h3>Transparency</h3>
-      <p><b>Keep</b> leaves it as-is. <b>Remove</b> flattens it onto a background color (the little swatch — white by default) so nothing's see-through. That's handy because indexed DMIs only do on/off transparency, and flattening stops soft edges from going black or muddy.</p>
-      <p><b>Keep/Remove</b> is for the image you're on; <b>All/None</b> does the whole batch in one click. The <i>has α / opaque</i> tag just tells you whether the current image even has any transparency.</p>
+      <p><b>Keep</b> leaves it alone. <b>Remove</b> fills the see-through parts with a color (white by default), so nothing's transparent.</p>
+      <p><b>Keep/Remove</b> is for the image you're on. <b>All/None</b> does every image at once.</p>
 
-      <h3>Naming &amp; exporting</h3>
-      <p>The little boxes under each preview are the <b>state names</b> that end up in the DMI — rename them to whatever you like (they turn red if two match, so you can fix duplicates).</p>
-      <p><b>Copy</b> puts the current icon on your clipboard to paste straight into a DMI editor. <b>Export ZIP</b> saves every icon as separate PNGs. <b>Export DMI</b> builds a real <code>.dmi</code> — one file, every icon as a named state. With Colors <b>On</b> it comes out as a compact indexed DMI at your chosen palette size; with Colors <b>Off</b>, full color.</p>
+      <h3>Names &amp; saving</h3>
+      <p>The boxes under each preview are the icon names in the DMI. Rename them however you like — matching names turn red so you can fix them.</p>
+      <p><b>Copy</b> copies the current icon so you can paste it. <b>Export ZIP</b> saves each icon as its own PNG. <b>Export DMI</b> makes one <code>.dmi</code> file with all your icons.</p>
 
-      <h3>Two quick tips</h3>
-      <p>Mixing wildly different art styles in one DMI? <b>Colors Off</b> (full color) keeps everything looking right — the shared 255-color palette only pays off when the set shares a style.</p>
-      <p>For flat, hand-drawn faces you can drop the color count surprisingly low before it shows. Start at 255 and only go lower until you spot banding you don't like.</p>
+      <h3>Tips</h3>
+      <p>Lots of different art styles in one DMI? Turn <b>Colors Off</b> so nothing looks wrong.</p>
+      <p>Start at 255 colors and only lower it if the art still looks fine.</p>
     </div>
   </div>
 
