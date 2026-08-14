@@ -497,6 +497,42 @@ function paletteFor(it, bytes){
   return medianCut(sampleBytes(bytes, outSize), MAX_COLORS);
 }
 
+/* Quantise an assembled (non-square) sheet to one shared <=MAX_COLORS palette,
+   in place. Per-image reduction can't bound a multi-icon sheet — each icon keeps
+   its own <=255 colours, so the sheet sums to thousands and the PNG barely
+   compresses. Building one palette from the whole sheet lands it at <=255 total,
+   matching a Dream-Maker-assembled .dmi's size. Alpha is left untouched. */
+function quantizeSheetShared(sctx, w, h){
+  var img = sctx.getImageData(0, 0, w, h);
+  var bytes = img.data, total = w * h;
+  var stride = Math.max(1, Math.floor(total / 4096)), samples = [];
+  for (var i = 0; i < total; i += stride){
+    var o = i * 4;
+    if (bytes[o+3] < 8) continue;
+    samples.push([bytes[o], bytes[o+1], bytes[o+2]]);
+  }
+  if (!samples.length) return;
+  var pal = medianCut(samples, MAX_COLORS), cache = {};
+  for (var j = 0; j < total; j++){
+    var p = j * 4;
+    if (bytes[p+3] === 0) continue;
+    var r = bytes[p], g = bytes[p+1], b = bytes[p+2];
+    var key = ((r>>2)<<12) | ((g>>2)<<6) | (b>>2);
+    var idx = cache[key];
+    if (idx === undefined){
+      var bestD = Infinity, bestI = 0;
+      for (var q = 0; q < pal.length; q++){
+        var dr=r-pal[q][0], dg=g-pal[q][1], db=b-pal[q][2];
+        var dd = dr*dr+dg*dg+db*db;
+        if (dd < bestD){ bestD = dd; bestI = q; }
+      }
+      idx = bestI; cache[key] = idx;
+    }
+    bytes[p] = pal[idx][0]; bytes[p+1] = pal[idx][1]; bytes[p+2] = pal[idx][2];
+  }
+  sctx.putImageData(img, 0, 0);
+}
+
 function remapToPalette(bytes, n, pal){
   if (!pal || !pal.length) return;
   var cache = {};
@@ -1632,6 +1668,7 @@ $("saveDmi").addEventListener("click", function(){
       var cv = render(it);
       sctx.drawImage(cv, (i % cols) * W, Math.floor(i / cols) * H);
     });
+    if (reduceColors) quantizeSheetShared(sctx, sheet.width, sheet.height);
     var names = uniqueStateNames(keep);
     sheet.toBlob(function(blob){
       blob.arrayBuffer().then(function(ab){
