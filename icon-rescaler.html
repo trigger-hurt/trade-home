@@ -114,6 +114,8 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
   box-shadow:0 6px 30px rgba(0,0,0,.55);
 }
 .stage.zoomed .holder{max-width:none;max-height:none}
+.stage.panning{cursor:grabbing}
+.stage.panning *{cursor:grabbing !important}
 .holder img{display:block;user-select:none;-webkit-user-drag:none}
 .dim{position:absolute;background:rgba(9,11,14,.66);pointer-events:none}
 .box{position:absolute;border:1px solid var(--accent);cursor:move}
@@ -955,12 +957,13 @@ function commit(){
   var mode = null, grip = null, start = null;
 
   $("box").addEventListener("pointerdown", function(e){
+    if (e.button !== 0) return;              // left button only; middle pans the stage
     var it = items[active];
     if (!it) return;
     grip = e.target.dataset ? e.target.dataset.h : null;
     mode = grip ? "size" : "move";
     start = { mx: e.clientX, my: e.clientY, c: { x: it.crop.x, y: it.crop.y, s: it.crop.s } };
-    e.target.setPointerCapture(e.pointerId);
+    try { e.target.setPointerCapture(e.pointerId); } catch (_){}
     e.preventDefault();
   });
 
@@ -1211,6 +1214,39 @@ $("stage").addEventListener("wheel", function(e){
     stage.scrollTop  += pr2.top  - (e.clientY - ry * pic.clientHeight);
   }
 }, { passive: false });
+
+/* Middle-mouse drag pans the stage (move the camera around a zoomed image). */
+(function(){
+  var stage = $("stage");
+  var panning = false, sx = 0, sy = 0, sl = 0, st = 0, pid = 0;
+
+  stage.addEventListener("pointerdown", function(e){
+    if (e.button !== 1 || active < 0) return;
+    panning = true; pid = e.pointerId;
+    sx = e.clientX; sy = e.clientY;
+    sl = stage.scrollLeft; st = stage.scrollTop;
+    try { stage.setPointerCapture(pid); } catch (_){}
+    stage.classList.add("panning");
+    e.preventDefault();
+  });
+  stage.addEventListener("pointermove", function(e){
+    if (!panning) return;
+    stage.scrollLeft = sl - (e.clientX - sx);   // grab-hand: content follows the cursor
+    stage.scrollTop  = st - (e.clientY - sy);
+    e.preventDefault();
+  });
+  function end(){
+    if (!panning) return;
+    panning = false;
+    try { stage.releasePointerCapture(pid); } catch (_){}
+    stage.classList.remove("panning");
+  }
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+  // Suppress the browser's middle-click autoscroll cursor.
+  stage.addEventListener("mousedown", function(e){ if (e.button === 1) e.preventDefault(); });
+  stage.addEventListener("auxclick", function(e){ if (e.button === 1) e.preventDefault(); });
+})();
 
 $("colSeg").addEventListener("click", function(e){
   var b = e.target.closest("button");
