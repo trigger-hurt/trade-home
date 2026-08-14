@@ -54,8 +54,8 @@ button.b{
 button.b:hover{background:#2e343b;border-color:#4c545e}
 button.b:disabled{color:#565e67;border-color:var(--line);background:var(--panel2);cursor:default}
 button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
-#save:not(:disabled){background:var(--accent);border-color:var(--accent);color:#1a1204;font-weight:600}
-#save:not(:disabled):hover{background:var(--accent2);border-color:var(--accent2)}
+#save:not(:disabled),#saveDmi:not(:disabled){background:var(--accent);border-color:var(--accent);color:#1a1204;font-weight:600}
+#save:not(:disabled):hover,#saveDmi:not(:disabled):hover{background:var(--accent2);border-color:var(--accent2)}
 
 .main{display:flex;flex:1;min-height:0}
 
@@ -184,6 +184,13 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 .cell.sel canvas{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .cell.off{opacity:.32}
 .cell span{display:block;font:11px/1 var(--mono);color:var(--dim);margin-top:5px}
+.cell input.cell-name{
+  display:block;width:100%;margin-top:5px;box-sizing:border-box;
+  font:11px/1.3 var(--mono);color:var(--text);text-align:center;
+  background:var(--panel2);border:1px solid var(--line2);border-radius:3px;padding:2px 3px;
+}
+.cell input.cell-name:focus{border-color:var(--accent);outline:none}
+.cell input.cell-name.dupe{border-color:var(--warn);color:var(--warn)}
 .strip .none{color:var(--dim);font-size:12px;padding:36px 0}
 
 .hide{display:none !important}
@@ -198,6 +205,7 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
     <button class="b" id="clear" disabled>Clear</button>
     <button class="b" id="copy" disabled>Copy</button>
     <button class="b" id="save" disabled>Export ZIP</button>
+    <button class="b" id="saveDmi" disabled>Export DMI</button>
   </div>
 
   <div class="main">
@@ -317,6 +325,7 @@ var paletteScope = "per";  // "per" (per-image palette) | "all" (one shared pale
 var MAX_COLORS = 255;
 var sharedPalette = null;  // cached global palette when scope === "all"
 var flattenBg = [255, 255, 255];  // background matte colour when removing transparency
+var stateSeq = 0;                 // monotonic default DMI state-name counter
 
 // Oversized sources are shrunk to this longest-side once on load, so a big
 // image doesn't pay a full-resolution Lanczos pass on every single edit.
@@ -878,6 +887,7 @@ function drawList(){
   });
   var inc = items.filter(function(x){ return x.include; }).length;
   $("save").disabled = inc === 0;
+  $("saveDmi").disabled = inc === 0;
   $("copy").disabled = active < 0;
   $("clear").disabled = items.length === 0;
   if (items.length) setStatus(items.length + " loaded, " + inc + " to export, " + outSize + "px");
@@ -904,20 +914,44 @@ function drawStrip(){
     row.innerHTML = '<span class="none">Nothing loaded.</span>';
     return;
   }
-  var num = 0, need = [];
+  var need = [];
   items.forEach(function(it, i){
     var cv = ensureCanvas(it);
     if (it.dirty) need.push(it);
     var cell = document.createElement("div");
     cell.className = "cell" + (i === active ? " sel" : "") + (it.include ? "" : " off");
     cell.appendChild(cv);
-    var tag = document.createElement("span");
-    tag.textContent = it.include ? exportName(num++) : "skipped";
-    cell.appendChild(tag);
+    // Editable DMI state name (like the icon-state list in a DMI editor).
+    var nameEl = document.createElement("input");
+    nameEl.className = "cell-name";
+    nameEl.value = it.state || "";
+    nameEl.title = "State name";
+    nameEl.addEventListener("input", function(){ it.state = nameEl.value; markDupeNames(); });
+    nameEl.addEventListener("pointerdown", function(e){ e.stopPropagation(); });
+    nameEl.addEventListener("click", function(e){ e.stopPropagation(); });
+    it._nameEl = nameEl;
+    cell.appendChild(nameEl);
     cell.addEventListener("click", function(){ select(i); });
     row.appendChild(cell);
   });
+  markDupeNames();
   if (need.length) enqueue(need);
+}
+
+/* Flag duplicate state names among included images (DMI states must be unique). */
+function markDupeNames(){
+  var seen = {};
+  items.forEach(function(it){
+    if (!it.include) return;
+    var k = (it.state || "").trim();
+    seen[k] = (seen[k] || 0) + 1;
+  });
+  items.forEach(function(it){
+    if (!it._nameEl) return;
+    var k = (it.state || "").trim();
+    var dup = it.include && (k === "" || seen[k] > 1);
+    it._nameEl.classList.toggle("dupe", !!dup);
+  });
 }
 
 function select(i){
@@ -1118,6 +1152,7 @@ function load(files){
         url: oversized ? null : url,
         rsrc: rsrc, rsc: rsc, thumbCanvas: thumb,
         w: iw, h: ih, rot: 0, flatten: false, hasAlpha: hasAlpha,
+        state: String(++stateSeq),
         crop: {
           x: (iw - s) / 2,
           y: Math.max(0, (ih - s) * 0.28),
@@ -1440,6 +1475,76 @@ function zip(files){
   return new Blob(parts.concat(central, [new Uint8Array(eo.buffer)]), { type: "application/zip" });
 }
 
+/* ---- .dmi export ----
+   A .dmi is a PNG spritesheet plus a zTXt "Description" chunk listing the icon
+   states. We wrap the metadata text in a minimal zlib "stored" stream (no real
+   compressor needed) so BYOND's inflate reads it. */
+function adler32(buf){
+  var a = 1, b = 0, i = 0, n = buf.length;
+  while (i < n){
+    var end = Math.min(i + 4000, n);
+    for (; i < end; i++){ a += buf[i]; b += a; }
+    a %= 65521; b %= 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+function zlibStore(data){
+  var out = [0x78, 0x01], i = 0, n = data.length;
+  if (n === 0) out.push(0x01, 0x00, 0x00, 0xff, 0xff);
+  while (i < n){
+    var len = Math.min(65535, n - i), last = (i + len >= n) ? 1 : 0;
+    out.push(last, len & 0xff, (len >> 8) & 0xff, (~len) & 0xff, ((~len) >> 8) & 0xff);
+    for (var j = 0; j < len; j++) out.push(data[i + j]);
+    i += len;
+  }
+  var ad = adler32(data);
+  out.push((ad >>> 24) & 0xff, (ad >>> 16) & 0xff, (ad >>> 8) & 0xff, ad & 0xff);
+  return new Uint8Array(out);
+}
+function pngChunk(type, data){
+  var t = new TextEncoder().encode(type);
+  var body = new Uint8Array(t.length + data.length);
+  body.set(t, 0); body.set(data, t.length);
+  var out = new Uint8Array(4 + body.length + 4);
+  var dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length, false);
+  out.set(body, 4);
+  dv.setUint32(4 + body.length, crc32(body), false);
+  return out;
+}
+function dmiDescription(names, w, h){
+  var s = "# BEGIN DMI\nversion = 4.0\n\twidth = " + w + "\n\theight = " + h + "\n";
+  for (var i = 0; i < names.length; i++){
+    s += 'state = "' + names[i] + '"\n\tdirs = 1\n\tframes = 1\n';
+  }
+  return s + "# END DMI\n";
+}
+function pngToDmi(pngBytes, descText){
+  var kw = new TextEncoder().encode("Description");
+  var comp = zlibStore(new TextEncoder().encode(descText));
+  var data = new Uint8Array(kw.length + 2 + comp.length);
+  data.set(kw, 0); data[kw.length] = 0; data[kw.length + 1] = 0;   // null + zlib method
+  data.set(comp, kw.length + 2);
+  var chunk = pngChunk("zTXt", data);
+  var n = pngBytes.length;                                          // IEND = final 12 bytes
+  var out = new Uint8Array(n + chunk.length);
+  out.set(pngBytes.subarray(0, n - 12), 0);
+  out.set(chunk, n - 12);
+  out.set(pngBytes.subarray(n - 12), n - 12 + chunk.length);
+  return out;
+}
+/* Make state names unique + non-empty for a valid .dmi (view stays untouched). */
+function uniqueStateNames(list){
+  var seen = {}, out = [];
+  list.forEach(function(it, i){
+    var base = (it.state || "").trim() || String(i + 1);
+    var name = base, k = 2;
+    while (seen[name]) name = base + "_" + (k++);
+    seen[name] = true; out.push(name);
+  });
+  return out;
+}
+
 function blobOf(canvas){
   return new Promise(function(res){ canvas.toBlob(res, "image/png"); });
 }
@@ -1506,6 +1611,38 @@ $("save").addEventListener("click", function(){
     btn.disabled = false;
     setStatus("Export failed: " + err.message);
   });
+});
+
+$("saveDmi").addEventListener("click", function(){
+  var btn = this;
+  var keep = items.filter(function(x){ return x.include; });
+  if (!keep.length) return;
+  btn.disabled = true;
+  setStatus("Building .dmi (" + keep.length + " states)…");
+  try {
+    var W = outSize, H = outSize;
+    var cols = Math.max(1, Math.ceil(Math.sqrt(keep.length)));
+    var rows = Math.ceil(keep.length / cols);
+    var sheet = document.createElement("canvas");
+    sheet.width = cols * W; sheet.height = rows * H;
+    var sctx = sheet.getContext("2d");
+    keep.forEach(function(it, i){
+      var cv = render(it);
+      sctx.drawImage(cv, (i % cols) * W, Math.floor(i / cols) * H);
+    });
+    var names = uniqueStateNames(keep);
+    sheet.toBlob(function(blob){
+      blob.arrayBuffer().then(function(ab){
+        var dmi = pngToDmi(new Uint8Array(ab), dmiDescription(names, W, H));
+        saveBlob(new Blob([dmi], { type: "image/png" }), "icons_" + outSize + ".dmi");
+        btn.disabled = false;
+        setStatus("Exported .dmi — " + keep.length + " states, " + W + "×" + H);
+      });
+    }, "image/png");
+  } catch (err){
+    btn.disabled = false;
+    setStatus("DMI export failed: " + err.message);
+  }
 });
 
 })();
