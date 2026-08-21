@@ -196,6 +196,13 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 
 .hide{display:none !important}
 
+/* Face-icon vs Playby mode */
+.top .topseg{margin:0 2px}
+.top .topseg button{padding:6px 12px;font:600 11px/1 var(--mono)}
+#pbSizeCtl{display:none}
+body.playby #sizeCtl{display:none}
+body.playby #pbSizeCtl{display:flex}
+
 /* ---- help / tutorial modal ---- */
 .modal{position:fixed;inset:0;background:rgba(6,8,11,.7);display:flex;align-items:center;justify-content:center;z-index:200;padding:24px}
 .modal.hidden{display:none}
@@ -222,6 +229,9 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 <div class="app">
   <div class="top">
     <h1>SL2 DMI Helper</h1>
+    <div class="seg topseg" id="appModeSeg" title="Face icons (square) or character playbys (238×400)">
+      <button data-m="icon" class="on">Face Icons</button><button data-m="playby">Playby</button>
+    </div>
     <span class="status" id="status">No images</span>
     <span class="gap"></span>
     <button class="b" id="help" title="How this works">Help</button>
@@ -237,6 +247,9 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
       <button class="modal-x" id="helpClose" title="Close">&times;</button>
       <h2>How this works</h2>
       <p class="lead">Make face icons from your art and save them as a DMI. Here's what each part does.</p>
+
+      <h3>Two modes</h3>
+      <p><b>Face Icons</b> (top-left) makes square icons at the Size you pick. <b>Playby</b> switches to 238×400 character portraits — the crop and output become that shape. Each image keeps its own crop for each mode, so flipping between them never disturbs the other.</p>
 
       <h3>Adding images</h3>
       <p>Drag image files onto the page, paste one with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or click <b>Add</b>. You can add a lot at once — up to 150. They show up in the list on the left and along the bottom.</p>
@@ -298,11 +311,15 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
       </div>
 
       <div class="bar">
-        <div class="ctl">
+        <div class="ctl" id="sizeCtl">
           <label>Size</label>
           <div class="seg" id="sizeSeg">
             <button data-v="32">32</button><button data-v="64">64</button><button data-v="96" class="on">96</button><button data-v="128">128</button><button data-v="160">160</button><button data-v="192">192</button><button data-v="256">256</button>
           </div>
+        </div>
+        <div class="ctl" id="pbSizeCtl">
+          <label>Output</label>
+          <span class="val" style="width:auto">238 × 400 (playby)</span>
         </div>
         <div class="ctl">
           <label for="sharp">Sharpen</label>
@@ -390,6 +407,42 @@ var MAX_COLORS = 255;
 var sharedPalette = null;  // cached global palette when scope === "all"
 var flattenBg = [255, 255, 255];  // background matte colour when removing transparency
 var stateSeq = 0;                 // monotonic default DMI state-name counter
+
+var appMode = "icon";             // "icon" (square face icons) | "playby" (238x400 portraits)
+var PB_W = 238, PB_H = 400;       // playby output size
+function cropAR(){ return appMode === "playby" ? PB_W / PB_H : 1; }  // crop width / height
+function outW(){ return appMode === "playby" ? PB_W : outSize; }
+function outH(){ return appMode === "playby" ? PB_H : outSize; }
+
+/* Default crop for a freshly loaded image: square for icons, 238:400 portrait
+   for playbys. (For icon mode this is exactly the old default.) */
+function initialCrop(iw, ih, mode){
+  var ar = mode === "playby" ? PB_W / PB_H : 1;
+  var maxS = Math.min(ih, iw / ar);
+  var s = maxS * (mode === "playby" ? 0.92 : 0.55);
+  var w = s * ar;
+  return { x: (iw - w) / 2, y: Math.max(0, (ih - s) * (mode === "playby" ? 0.06 : 0.28)), s: s };
+}
+/* Each image keeps its own crop per mode; point it.crop at the current one. */
+function syncCrops(){
+  items.forEach(function(it){
+    if (!it.crops) it.crops = {};
+    if (!it.crops[appMode]) it.crops[appMode] = initialCrop(it.w, it.h, appMode);
+    it.crop = it.crops[appMode];
+  });
+}
+/* Switch Face Icon <-> Playby without disturbing the other mode's crops. */
+function setAppMode(m){
+  if (m === appMode || (m !== "icon" && m !== "playby")) return;
+  appMode = m;
+  syncCrops();
+  document.body.classList.toggle("playby", m === "playby");
+  items.forEach(function(it){ it.canvas = null; it.dirty = true; });   // resize previews
+  sharedPalette = null;
+  drawStrip();
+  if (active >= 0) place();
+  enqueue(items.slice());
+}
 
 // Oversized sources are shrunk to this longest-side once on load, so a big
 // image doesn't pay a full-resolution Lanczos pass on every single edit.
@@ -520,8 +573,8 @@ function medianCut(samples, maxColors){
   });
 }
 
-function sampleBytes(bytes, n){
-  var total = n*n, stride = Math.max(1, Math.floor(total/2048)), out = [];
+function sampleBytes(bytes, total){
+  var stride = Math.max(1, Math.floor(total/2048)), out = [];
   for (var i = 0; i < total; i += stride){
     var o = i*4;
     if (bytes[o+3] < 8) continue;
@@ -535,13 +588,13 @@ function sampleBytes(bytes, n){
 function collectCropSamples(it, sink){
   var src = it.rsrc || it.img;
   if (!src) return;
-  var N = 24, rsc = it.rsc || 1;
+  var N = 24, rsc = it.rsc || 1, ar = cropAR();
   var tmp = document.createElement("canvas");
   tmp.width = N; tmp.height = N;
   var g = tmp.getContext("2d", { willReadFrequently: true });
-  var s = Math.max(1, Math.round(it.crop.s * rsc));
+  var cw = Math.max(1, Math.round(it.crop.s * ar * rsc)), ch = Math.max(1, Math.round(it.crop.s * rsc));
   try {
-    g.drawImage(src, Math.round(it.crop.x*rsc), Math.round(it.crop.y*rsc), s, s, 0, 0, N, N);
+    g.drawImage(src, Math.round(it.crop.x*rsc), Math.round(it.crop.y*rsc), cw, ch, 0, 0, N, N);
     var d = g.getImageData(0, 0, N, N).data;
     for (var i = 0; i < N*N; i++){ var o=i*4; if (d[o+3] < 8) continue; sink.push([d[o],d[o+1],d[o+2]]); }
   } catch (e){ /* tainted canvas — skip */ }
@@ -558,13 +611,12 @@ function paletteFor(it, bytes){
     if (!sharedPalette) buildSharedPalette();
     return sharedPalette;
   }
-  return medianCut(sampleBytes(bytes, outSize), MAX_COLORS);
+  return medianCut(sampleBytes(bytes, outW() * outH()), MAX_COLORS);
 }
 
-function remapToPalette(bytes, n, pal){
+function remapToPalette(bytes, total, pal){
   if (!pal || !pal.length) return;
   var cache = {};
-  var total = n*n;
   for (var i = 0; i < total; i++){
     var o = i*4;
     if (bytes[o+3] === 0) continue;
@@ -749,40 +801,42 @@ function render(it){
   var c = it.crop;
   var rsc = it.rsc || 1;
   var src = it.rsrc || it.img;
-  var s = Math.max(1, Math.round(c.s * rsc));
+  var ar = cropAR(), ow = outW(), oh = outH();
+  var cw = Math.max(1, Math.round(c.s * ar * rsc));   // crop width  (source px)
+  var ch = Math.max(1, Math.round(c.s * rsc));        // crop height (source px)
   var cut = document.createElement("canvas");
-  cut.width = s; cut.height = s;
+  cut.width = cw; cut.height = ch;
   var cx = cut.getContext("2d", { willReadFrequently: true });
   var th = (it.rot || 0) * Math.PI / 180;
   if (th){
-    // Sample a rotated square: spin the source about the crop centre so the
+    // Sample a rotated crop: spin the source about the crop centre so the
     // tilted selection lands upright in the output (fills, no empty corners).
-    var ccx = (c.x + c.s / 2) * rsc, ccy = (c.y + c.s / 2) * rsc;
+    var ccx = (c.x + c.s * ar / 2) * rsc, ccy = (c.y + c.s / 2) * rsc;
     cx.save();
-    cx.translate(s / 2, s / 2);
+    cx.translate(cw / 2, ch / 2);
     cx.rotate(-th);
     cx.translate(-ccx, -ccy);
     cx.drawImage(src, 0, 0);
     cx.restore();
   } else {
-    cx.drawImage(src, Math.round(c.x * rsc), Math.round(c.y * rsc), s, s, 0, 0, s, s);
+    cx.drawImage(src, Math.round(c.x * rsc), Math.round(c.y * rsc), cw, ch, 0, 0, cw, ch);
   }
 
-  var cur = s;
-  while (cur > 1024){
-    var half = Math.max(outSize, Math.round(cur / 2));
+  var curW = cw, curH = ch;
+  while (Math.max(curW, curH) > 1024){
+    var hw = Math.max(ow, Math.round(curW / 2)), hh = Math.max(oh, Math.round(curH / 2));
     var step = document.createElement("canvas");
-    step.width = half; step.height = half;
+    step.width = hw; step.height = hh;
     var sctx = step.getContext("2d", { willReadFrequently: true });
     sctx.imageSmoothingEnabled = true;
     sctx.imageSmoothingQuality = "high";
-    sctx.drawImage(cut, 0, 0, cur, cur, 0, 0, half, half);
-    cut = step; cx = sctx; cur = half;
+    sctx.drawImage(cut, 0, 0, curW, curH, 0, 0, hw, hh);
+    cut = step; cx = sctx; curW = hw; curH = hh;
   }
 
   var raw;
   try {
-    raw = cx.getImageData(0, 0, cur, cur).data;
+    raw = cx.getImageData(0, 0, curW, curH).data;
   } catch (err){
     var e2 = new Error(location.protocol === "file:"
       ? "Blocked under file:// - serve over http instead"
@@ -791,10 +845,10 @@ function render(it){
     throw e2;
   }
 
-  var f = toFloat(raw, cur * cur, linear);
-  var px = resample(f, cur, cur, outSize, outSize);
-  sharpenPass(px, outSize, outSize, sharpen, clamped);
-  var bytes = toBytes(px, outSize, outSize, linear);
+  var f = toFloat(raw, curW * curH, linear);
+  var px = resample(f, curW, curH, ow, oh);
+  sharpenPass(px, ow, oh, sharpen, clamped);
+  var bytes = toBytes(px, ow, oh, linear);
 
   // Remove transparency by compositing over a solid background colour (default
   // white) — NOT by just forcing alpha opaque, which would expose the hidden
@@ -813,13 +867,13 @@ function render(it){
       }
     }
   }
-  if (reduceColors) remapToPalette(bytes, outSize, paletteFor(it, bytes));
+  if (reduceColors) remapToPalette(bytes, ow * oh, paletteFor(it, bytes));
 
   var out = it.canvas || document.createElement("canvas");
-  out.width = outSize; out.height = outSize;
-  out.style.width = outSize + "px";
-  out.style.height = outSize + "px";
-  out.getContext("2d").putImageData(new ImageData(bytes, outSize, outSize), 0, 0);
+  out.width = ow; out.height = oh;
+  out.style.width = ow + "px";
+  out.style.height = oh + "px";
+  out.getContext("2d").putImageData(new ImageData(bytes, ow, oh), 0, 0);
   it.canvas = out;
   it.broken = false;
   it.dirty = false;
@@ -954,7 +1008,7 @@ function drawList(){
   $("saveDmi").disabled = inc === 0;
   $("copy").disabled = active < 0;
   $("clear").disabled = items.length === 0;
-  if (items.length) setStatus(items.length + " loaded, " + inc + " to export, " + outSize + "px");
+  if (items.length) setStatus(items.length + " loaded, " + inc + " to export, " + (appMode === "playby" ? PB_W + "×" + PB_H : outSize + "px"));
   else setStatus("No images");
 }
 
@@ -963,8 +1017,8 @@ function drawList(){
 function ensureCanvas(it){
   if (!it.canvas){
     var cv = document.createElement("canvas");
-    cv.width = outSize; cv.height = outSize;
-    cv.style.width = outSize + "px"; cv.style.height = outSize + "px";
+    cv.width = outW(); cv.height = outH();
+    cv.style.width = outW() + "px"; cv.style.height = outH() + "px";
     it.canvas = cv;
     it.dirty = true;
   }
@@ -1079,23 +1133,27 @@ function place(){
   var it = items[active];
   if (!it) return;
   fit();
-  var k = scale(), c = it.crop;
-  var x = c.x * k, y = c.y * k, s = c.s * k;
+  var k = scale(), c = it.crop, ar = cropAR();
+  var x = c.x * k, y = c.y * k, w = c.s * ar * k, h = c.s * k;
   var el = $("box");
   el.style.left = x + "px"; el.style.top = y + "px";
-  el.style.width = s + "px"; el.style.height = s + "px";
+  el.style.width = w + "px"; el.style.height = h + "px";
   // Rotate the selection box in place; its box-shadow dims everything outside.
   el.style.transform = it.rot ? "rotate(" + it.rot + "deg)" : "";
-  $("crop").value = Math.min(100, Math.max(5, Math.round(c.s / Math.min(it.w, it.h) * 100)));
-  $("cropV").textContent = Math.round(c.s) + "px";
+  var maxS = Math.min(it.h, it.w / ar);
+  $("crop").value = Math.min(100, Math.max(5, Math.round(c.s / maxS * 100)));
+  $("cropV").textContent = appMode === "playby"
+    ? Math.round(c.s * ar) + "×" + Math.round(c.s)
+    : Math.round(c.s) + "px";
 }
 
 function clampCrop(it){
-  var c = it.crop;
-  var max = Math.min(it.w, it.h);
-  c.s = Math.max(8, Math.min(max, c.s));
-  c.x = Math.max(0, Math.min(it.w - c.s, c.x));
-  c.y = Math.max(0, Math.min(it.h - c.s, c.y));
+  var c = it.crop, ar = cropAR();
+  var maxS = Math.min(it.h, it.w / ar);
+  c.s = Math.max(8, Math.min(maxS, c.s));
+  var w = c.s * ar, h = c.s;
+  c.x = Math.max(0, Math.min(it.w - w, c.x));
+  c.y = Math.max(0, Math.min(it.h - h, c.y));
 }
 
 function commit(){
@@ -1141,11 +1199,12 @@ function commit(){
             : grip === "nw" ? -(ldx + ldy) / 2
             : grip === "ne" ? (ldx - ldy) / 2
             : (ldy - ldx) / 2;
-      var max = Math.min(it.w, it.h);
+      var ar = cropAR();
+      var max = Math.min(it.h, it.w / ar);
       var ns = Math.max(8, Math.min(max, start.c.s + d));
-      var ccx = start.c.x + start.c.s / 2, ccy = start.c.y + start.c.s / 2;
+      var ccx = start.c.x + start.c.s * ar / 2, ccy = start.c.y + start.c.s / 2;
       it.crop.s = ns;
-      it.crop.x = ccx - ns / 2;
+      it.crop.x = ccx - ns * ar / 2;
       it.crop.y = ccy - ns / 2;
     }
     clampCrop(it);
@@ -1206,22 +1265,18 @@ function load(files){
       }
       var thumb = makeThumbCanvas(img, iw, ih);
       var hasAlpha = detectAlpha(img, iw, ih);
-      var min = Math.min(iw, ih);
-      var s = min * 0.55;
       // Oversized images render/display entirely from the 1024 copy + thumb, so
       // drop the full-res original to keep memory sane with big batches.
       var oversized = rsc < 1;
+      var c0 = initialCrop(iw, ih, appMode), crops = {};
+      crops[appMode] = c0;
       items.push({
         img: oversized ? null : img,
         url: oversized ? null : url,
         rsrc: rsrc, rsc: rsc, thumbCanvas: thumb,
         w: iw, h: ih, rot: 0, flatten: false, hasAlpha: hasAlpha,
         state: String(++stateSeq),
-        crop: {
-          x: (iw - s) / 2,
-          y: Math.max(0, (ih - s) * 0.28),
-          s: s
-        },
+        crops: crops, crop: c0,
         include: true, canvas: null, broken: false, dirty: true
       });
       if (oversized) URL.revokeObjectURL(url);
@@ -1300,6 +1355,15 @@ seg("sizeSeg", function(v){ outSize = parseInt(v, 10); });
 seg("modeSeg", function(v){ clamped = v === "1"; });
 seg("mixSeg", function(v){ linear = v === "1"; });
 
+/* Face Icons <-> Playby (238x400). Doesn't disturb the other mode's crops. */
+$("appModeSeg").addEventListener("click", function(e){
+  var b = e.target.closest("button");
+  if (!b) return;
+  Array.prototype.forEach.call(this.children, function(x){ x.classList.remove("on"); });
+  b.classList.add("on");
+  setAppMode(b.dataset.m);
+});
+
 $("sharp").addEventListener("input", function(){
   sharpen = this.value / 100;
   $("sharpV").textContent = this.value + "%";
@@ -1309,10 +1373,11 @@ $("sharp").addEventListener("change", renderAll);
 $("crop").addEventListener("input", function(){
   var it = items[active];
   if (!it) return;
-  var ns = Math.min(it.w, it.h) * (this.value / 100);
-  var cx = it.crop.x + it.crop.s / 2, cy = it.crop.y + it.crop.s / 2;
+  var ar = cropAR();
+  var ns = Math.min(it.h, it.w / ar) * (this.value / 100);
+  var cx = it.crop.x + it.crop.s * ar / 2, cy = it.crop.y + it.crop.s / 2;
   it.crop.s = ns;
-  it.crop.x = cx - ns / 2;
+  it.crop.x = cx - ns * ar / 2;
   it.crop.y = cy - ns / 2;
   clampCrop(it);
   place();
@@ -1736,7 +1801,7 @@ function copyActive(){
   }
   try {
     navigator.clipboard.write([ new ClipboardItem({ "image/png": p }) ])
-      .then(function(){ setStatus("Copied at " + outSize + "px"); })
+      .then(function(){ setStatus("Copied at " + (appMode === "playby" ? PB_W + "×" + PB_H : outSize + "px")); })
       .catch(function(){
         p.then(function(b){ setStatus("Clipboard blocked, saved instead"); saveBlob(b, "icon.png"); });
       });
@@ -1767,7 +1832,7 @@ $("save").addEventListener("click", function(){
       return { name: exportName(i), data: data };
     });
   })).then(function(files){
-    saveBlob(zip(files), "icons_" + outSize + ".zip");
+    saveBlob(zip(files), (appMode === "playby" ? "playbys_" + PB_W + "x" + PB_H : "icons_" + outSize) + ".zip");
     btn.disabled = false;
     setStatus("Exported " + files.length + " files");
   }).catch(function(err){
@@ -1783,7 +1848,7 @@ $("saveDmi").addEventListener("click", function(){
   btn.disabled = true;
   setStatus("Building .dmi (" + keep.length + " states)…");
   try {
-    var W = outSize, H = outSize;
+    var W = outW(), H = outH();
     var cols = Math.max(1, Math.ceil(Math.sqrt(keep.length)));
     var rows = Math.ceil(keep.length / cols);
     var sheet = document.createElement("canvas");
@@ -1806,7 +1871,7 @@ $("saveDmi").addEventListener("click", function(){
 
     var desc = dmiDescription(uniqueStateNames(keep), W, H);
     var finish = function(bytes){
-      saveBlob(new Blob([bytes], { type: "image/png" }), "icons_" + outSize + ".dmi");
+      saveBlob(new Blob([bytes], { type: "image/png" }), (appMode === "playby" ? "playbys_" + PB_W + "x" + PB_H : "icons_" + outSize) + ".dmi");
       btn.disabled = false;
       setStatus("Exported .dmi — " + keep.length + " states, " + W + "×" + H +
                 (wantIndexed ? " (indexed ≤" + MAX_COLORS + ", " + (bytes.length/1024|0) + "KB)" : ""));
