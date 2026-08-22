@@ -184,6 +184,9 @@ button.b:disabled:hover{background:var(--panel2);border-color:var(--line)}
 }
 .cell.sel canvas{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .cell.off{opacity:.32}
+.cell canvas{cursor:grab}
+.cell canvas:active{cursor:grabbing}
+.cell.drop-into{outline:2px dashed var(--accent);outline-offset:2px}
 .cell span{display:block;font:11px/1 var(--mono);color:var(--dim);margin-top:5px}
 .cell input.cell-name{
   display:block;width:72px;max-width:100%;margin:5px auto 0;box-sizing:border-box;
@@ -236,6 +239,7 @@ body.playby #pbSizeCtl{display:flex}
     <span class="gap"></span>
     <button class="b" id="help" title="How this works">Help</button>
     <button class="b" id="add">Add</button>
+    <button class="b" id="importBtn" title="Open a .dmi and load its states as images">Import DMI</button>
     <button class="b" id="clear" disabled>Clear</button>
     <button class="b" id="copy" disabled>Copy</button>
     <button class="b" id="save" disabled>Export ZIP</button>
@@ -389,6 +393,7 @@ body.playby #pbSizeCtl{display:flex}
 </div>
 
 <input type="file" id="file" accept="image/*" multiple class="hide">
+<input type="file" id="dmiFile" accept=".dmi,image/png" class="hide">
 
 <script>
 (function(){
@@ -437,6 +442,9 @@ function setAppMode(m){
   appMode = m;
   syncCrops();
   document.body.classList.toggle("playby", m === "playby");
+  var mb = $("appModeSeg").children;                 // keep the toggle in sync (e.g. on import)
+  mb[0].classList.toggle("on", m === "icon");
+  mb[1].classList.toggle("on", m === "playby");
   items.forEach(function(it){ it.canvas = null; it.dirty = true; });   // resize previews
   sharedPalette = null;
   drawStrip();
@@ -1038,6 +1046,13 @@ function drawStrip(){
     if (it.dirty) need.push(it);
     var cell = document.createElement("div");
     cell.className = "cell" + (i === active ? " sel" : "") + (it.include ? "" : " off");
+    // Drag the preview to reorder (the name box below stays editable).
+    cv.draggable = true;
+    cv.addEventListener("dragstart", function(e){ dragFrom = i; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(i)); } catch (_){} });
+    cell.addEventListener("dragover", function(e){ if (dragFrom >= 0){ e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_){} cell.classList.add("drop-into"); } });
+    cell.addEventListener("dragleave", function(){ cell.classList.remove("drop-into"); });
+    cell.addEventListener("drop", function(e){ e.preventDefault(); cell.classList.remove("drop-into"); if (dragFrom >= 0){ moveItem(dragFrom, i); dragFrom = -1; } });
+    cv.addEventListener("dragend", function(){ dragFrom = -1; });
     cell.appendChild(cv);
     // Editable DMI state name (like the icon-state list in a DMI editor).
     var nameEl = document.createElement("input");
@@ -1305,6 +1320,112 @@ $("file").addEventListener("change", function(e){ load(e.target.files); e.target
 $("add").addEventListener("click", function(){ $("file").click(); });
 $("add2").addEventListener("click", function(){ $("file").click(); });
 $("clear").addEventListener("click", clearAll);
+
+/* ---- Import a .dmi: slice its spritesheet into individual states ---- */
+function loadImage(url){
+  return new Promise(function(res, rej){ var im = new Image(); im.onload = function(){ res(im); }; im.onerror = rej; im.src = url; });
+}
+function inflateZlib(bytes){
+  if (typeof DecompressionStream === "undefined") return Promise.reject(new Error("no DecompressionStream"));
+  var ds = new DecompressionStream("deflate");
+  var w = ds.writable.getWriter(); w.write(bytes); w.close();
+  return new Response(ds.readable).arrayBuffer().then(function(ab){ return new Uint8Array(ab); });
+}
+/* Return the compressed bytes of the zTXt "Description" chunk, or null. */
+function findDmiDescription(bytes){
+  var off = 8;
+  while (off + 12 <= bytes.length){
+    var len = (bytes[off]<<24 | bytes[off+1]<<16 | bytes[off+2]<<8 | bytes[off+3]) >>> 0;
+    var type = String.fromCharCode(bytes[off+4], bytes[off+5], bytes[off+6], bytes[off+7]);
+    if (type === "zTXt"){
+      var data = bytes.subarray(off+8, off+8+len);
+      var k = data.indexOf(0);
+      if (k > 0 && String.fromCharCode.apply(null, data.subarray(0, k)) === "Description")
+        return data.subarray(k + 2);                 // skip null + compression-method byte
+    }
+    if (type === "IEND") break;
+    off += 12 + len;
+  }
+  return null;
+}
+function parseDmiText(text){
+  var W = +((text.match(/width\s*=\s*(\d+)/) || [])[1]) || 0;
+  var H = +((text.match(/height\s*=\s*(\d+)/) || [])[1]) || 0;
+  var states = [], re = /state\s*=\s*"((?:[^"\\]|\\.)*)"([\s\S]*?)(?=state\s*=\s*"|#\s*END\s*DMI|$)/g, m;
+  while ((m = re.exec(text))){
+    var blk = m[2];
+    states.push({
+      name: m[1].replace(/\\(.)/g, "$1"),
+      dirs: +((blk.match(/dirs\s*=\s*(\d+)/) || [])[1]) || 1,
+      frames: +((blk.match(/frames\s*=\s*(\d+)/) || [])[1]) || 1
+    });
+  }
+  return { W: W, H: H, states: states };
+}
+
+$("importBtn").addEventListener("click", function(){ $("dmiFile").click(); });
+$("dmiFile").addEventListener("change", function(e){ var f = e.target.files[0]; if (f) importDmi(f); e.target.value = ""; });
+
+function importDmi(file){
+  setStatus("Reading " + file.name + "…");
+  file.arrayBuffer().then(function(ab){
+    var bytes = new Uint8Array(ab);
+    var comp = findDmiDescription(bytes);
+    var url = URL.createObjectURL(new Blob([ab], { type: "image/png" }));
+    return loadImage(url).then(function(img){
+      var done = function(text){
+        var d = text ? parseDmiText(text) : { W: 0, H: 0, states: [] };
+        var W = d.W || img.naturalWidth, H = d.H || img.naturalHeight;
+        var cols = Math.max(1, Math.round(img.naturalWidth / W));
+
+        // Match the mode to the file's cell aspect so the whole cell fits the crop.
+        if (Math.abs(W / H - PB_W / PB_H) < 0.03) setAppMode("playby");
+        else if (W === H) setAppMode("icon");
+
+        var stateList = d.states.length ? d.states : [{ name: "", dirs: 1, frames: 1 }];
+        var room = MAX_IMAGES - items.length, added = 0, cell = 0, wasEmpty = active < 0;
+        for (var s = 0; s < stateList.length && added < room; s++){
+          var st = stateList[s], ci = cell;
+          cell += st.dirs * st.frames;
+          var col = ci % cols, row = Math.floor(ci / cols);
+          var cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+          cv.getContext("2d").drawImage(img, col*W, row*H, W, H, 0, 0, W, H);
+          var full = { x: 0, y: 0, s: (appMode === "playby" ? H : Math.min(W, H)) };
+          var crops = {}; crops[appMode] = full;
+          items.push({
+            img: cv, url: cv.toDataURL("image/png"), rsrc: null, rsc: 1,
+            thumbCanvas: makeThumbCanvas(cv, W, H), hasAlpha: detectAlpha(cv, W, H),
+            w: W, h: H, rot: 0, flatten: false,
+            state: st.name || String(++stateSeq),
+            crops: crops, crop: full,
+            include: true, canvas: null, broken: false, dirty: true
+          });
+          added++;
+        }
+        URL.revokeObjectURL(url);
+        sharedPalette = null;
+        if (wasEmpty && items.length) select(0);
+        drawList(); drawStrip();
+        setStatus("Imported " + added + " state" + (added === 1 ? "" : "s") + " from .dmi (" + W + "×" + H + ")" +
+                  (!text ? " — no DMI metadata, treated as one image" : ""));
+      };
+      if (comp) return inflateZlib(comp).then(function(u8){ done(new TextDecoder().decode(u8)); }).catch(function(){ done(null); });
+      done(null);
+    });
+  }).catch(function(err){ setStatus("Import failed: " + err.message); });
+}
+
+/* ---- drag-to-reorder the previews ---- */
+var dragFrom = -1;
+function moveItem(from, to){
+  if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return;
+  var it = items.splice(from, 1)[0];
+  items.splice(to, 0, it);
+  if (active === from) active = to;
+  else if (from < active && to >= active) active--;
+  else if (from > active && to <= active) active++;
+  drawList(); drawStrip();
+}
 
 /* Help / tutorial modal */
 function closeHelp(){ $("helpModal").classList.add("hidden"); }
